@@ -46,7 +46,7 @@ Uses Faker for synthetic customer data. Connects naturally to Onemyle's real wor
 | P4 | p4_stocksage | StockSage — stock analysis agent | Multi-agent, Mem0 memory, reasoning model selection | #29–33 | 2 |
 | P5 | p5_reviewcrew | ReviewCrew — GitHub PR reviewer | CrewAI, parallel execution, hierarchical agents | #34–36 | 3 |
 | P6 | p6_mcp | MCP++ + A2A — Onemyle MCP server | MCP spec, streamable-http, OAuth 2.1, A2A protocol | #37–39, #73 | 3 |
-| P7 | p7_observable | Customer Health Monitor — observability + evals | LangSmith, LangFuse, Faker, churn detection, **Ragas, DeepEval, Promptfoo** | #40–42, **#79** | 3 |
+| P7 | matchscout-onemyle | **MatchScout — Onemyle Marketplace PoC** (replaces ChurnGuard) | 3-stage cascade (rules + vector + LLM), LangGraph, sentence-transformers, Ragas, DeepEval, Promptfoo, LangSmith, LangFuse | #87 (replaces #40-42, #79) | 3 |
 | P8 | p8_security | PII Compliance Agent — agent security | OWASP LLM Top 10, PII detection, NeMo Guardrails | #48 | 3 |
 | P9 | p9_memory | Account Memory Agent — long-term memory | Zep (Graphiti), Mem0, temporal knowledge graphs | #49 | 3–4 |
 | P10 | p10_platform | AgentPlatform — production deploy | Docker, k3s, GitHub Actions, AWS Bedrock, Terraform, **FastAPI, Pinecone, multi-cloud routing, reliability patterns, cost tracking** | #43–45, **#74–78** | 4 |
@@ -68,12 +68,33 @@ Uses Faker for synthetic customer data. Connects naturally to Onemyle's real wor
 - P4: multi-tool orchestration, structured output, domain RAG, agent synthesis, financial APIs
 - P5: CrewAI agents/tasks/crew, agent specialization, parallel execution, hierarchical agents
 - P6: MCP spec, streamable-http transport, tool schemas, resource protocol, OAuth 2.1, A2A protocol
-- P7: LangSmith tracing, span hierarchy, eval datasets, evaluator functions, LangFuse dashboards, Faker, **Ragas (context precision/faithfulness/answer relevancy), DeepEval (LLM unit tests), Promptfoo (A/B testing), regression suite**
+- P7 (MatchScout — Onemyle PoC): **3-stage cascade architecture (rules filter → vector similarity → LLM agent)**, LangGraph state machine, sentence-transformers for embeddings/vector ranking, Faker for synthetic marketplace data, LangSmith tracing, LangFuse dashboards, **Ragas (faithfulness/groundedness), DeepEval (LLM unit tests), Promptfoo (A/B testing), regression suite gating CI**, two-sided marketplace product thinking, category taxonomy + adjacency design, cold-start awareness, marketplace fairness considerations
 - P8: OWASP LLM Top 10, PII detection, prompt injection blocking, NeMo Guardrails, audit trails
 - P9: Zep temporal knowledge graphs, Mem0 semantic facts, LongMemEval benchmark comparison
 - P10: Docker multi-stage builds, k8s manifests, secrets management, GitHub Actions CI/CD, Bedrock, **FastAPI + SSE streaming, Pinecone migration from Chroma, multi-cloud LLM routing (Bedrock + Azure OpenAI + GCP Vertex), reliability patterns (tenacity exponential backoff, pybreaker circuit breaker, automatic provider fallback), per-request token + USD cost tracking with budget alerts**
 - P11: PyMuPDF page rendering, Claude vision API, base64 image content blocks, multi-modal RAG
 - **P12: AutoGen conversational multi-agent pattern, framework comparison methodology (LoC, latency, cost, debuggability), technical writing for LinkedIn**
+
+## P7 → MatchScout Pivot (2026-05-09)
+
+P7 was originally "ChurnGuard" — a synthetic SaaS churn prediction agent.
+Pivoted to **MatchScout** — a real Onemyle initiative with the same learning
+objectives but framed as a formal pro bono PoC at Onemyle (where Rajesh is
+an angel investor + pro bono Product/AI Lead).
+
+**Why pivot:** ChurnGuard would have been a hobby project on the resume.
+MatchScout is a formal Onemyle initiative — credible, real, defensible in
+interviews. Same technical learning + marketplace AI patterns added.
+
+**MatchScout = AI match-quality predictor for Onemyle's two-sided marketplace** (creators ↔ local businesses). 3-stage cascade architecture (rules filter → vector similarity → LLM agent) covering everything ChurnGuard would have taught, plus marketplace AI patterns.
+
+**Status:** PoC. Synthetic data. Productionization pending Onemyle roadmap.
+
+**Replaces:** P7 #40, #41, #42, #79 (those tickets superseded). PM artifact ticket (was #81) is incorporated into MatchScout deliverables.
+
+**New ticket:** #87 — MatchScout — Onemyle Marketplace PoC.
+
+**Design doc:** `matchscout-onemyle/DESIGN.html` (architecture, data flow, runtime model)
 
 ## Path B — AI Product Management Track (added 2026-05-01)
 

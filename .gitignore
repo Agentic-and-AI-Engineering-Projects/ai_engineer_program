@@ -17,3 +17,9 @@ build/
 RESUME_RAJESH_RAMANI.*
 **/data/chroma_db/
 chroma_data/
+**/Passport*
+**/passport*
+**/*.jpeg
+**/*.jpg
+!matchscout-onemyle/**/*.jpeg  # allow project-related images later
+!matchscout-onemyle/**/*.jpg

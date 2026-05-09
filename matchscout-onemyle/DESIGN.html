@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MatchScout — Design Document</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 30px 40px;
+    color: #222; line-height: 1.55; background: #fafbfc;
+  }
+  header { border-bottom: 3px solid #1a4d8f; padding-bottom: 14px; margin-bottom: 24px; }
+  h1 { margin: 0; color: #1a4d8f; font-size: 26pt; }
+  .subtitle { color: #666; font-size: 11pt; margin-top: 6px; }
+  h2 {
+    color: #1a4d8f; border-bottom: 2px solid #1a4d8f; padding-bottom: 6px;
+    margin-top: 50px; font-size: 19pt; padding-top: 10px;
+  }
+  h3 { margin-top: 28px; font-size: 14pt; color: #333; border-bottom: 1px solid #e0e0e0; padding-bottom: 3px; }
+  h4 { font-size: 12pt; color: #555; margin-top: 18px; margin-bottom: 6px; }
+  pre {
+    background: #1e1e1e; color: #d4d4d4; padding: 12px 14px;
+    border-radius: 5px; overflow-x: auto; font-size: 10pt; line-height: 1.4;
+  }
+  code { background: #f1f3f5; padding: 1px 5px; border-radius: 3px; font-size: 90%; color: #c7254e; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table {
+    border-collapse: collapse; width: 100%; margin: 12px 0; background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); font-size: 10.5pt;
+  }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f0f4fa; color: #1a4d8f; font-weight: 600; border-bottom: 2px solid #1a4d8f; }
+  tr:hover { background: #f9fbff; }
+  .info { background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 12px 16px; margin: 14px 0; border-radius: 4px; }
+  .info-title { font-weight: 600; color: #0c5460; margin-bottom: 6px; }
+  .gotcha { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 14px 0; border-radius: 4px; }
+  .tip { background: #d4edda; border-left: 4px solid #28a745; padding: 12px 16px; margin: 14px 0; border-radius: 4px; }
+  .toc { background: #f0f4fa; border: 1px solid #d4e0f0; padding: 14px 22px; border-radius: 4px; margin: 16px 0 36px 0; }
+  .toc h3 { margin-top: 0; border: none; }
+  .toc ul { margin: 4px 0 0 0; padding-left: 20px; }
+  .toc li { margin: 3px 0; font-size: 10.5pt; }
+  .toc a { color: #1a4d8f; text-decoration: none; }
+  .part { background: #1a4d8f; color: white; padding: 14px 24px; margin-top: 50px; border-radius: 6px; font-size: 17pt; font-weight: 600; }
+  .ascii-diagram {
+    background: #f8f9fa; border: 1px solid #ddd; padding: 14px; font-family: 'Menlo', 'Courier New', monospace;
+    font-size: 10pt; line-height: 1.3; white-space: pre; overflow-x: auto; border-radius: 4px;
+  }
+  footer { margin-top: 50px; padding-top: 16px; border-top: 1px solid #ddd; color: #888; font-size: 9pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MatchScout — Design Document</h1>
+  <div class="subtitle">
+    AI Match-Quality Predictor for Onemyle's Two-Sided Marketplace · Proof of Concept · v1.0 · 2026-05-09
+  </div>
+</header>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#overview">1. Overview</a></li>
+    <li><a href="#problem">2. Problem Statement</a></li>
+    <li><a href="#scope">3. Scope (V1 PoC)</a></li>
+    <li><a href="#architecture">4. Architecture (3-Stage Cascade)</a></li>
+    <li><a href="#components">5. Components — Detailed</a></li>
+    <li><a href="#data-model">6. Data Model</a></li>
+    <li><a href="#category-schema">7. Category Schema</a></li>
+    <li><a href="#data-flow">8. End-to-End Data Flow</a></li>
+    <li><a href="#runtime">9. Runtime Model — When Does What Run?</a></li>
+    <li><a href="#triggers">10. Trigger Patterns (V1 vs V2)</a></li>
+    <li><a href="#observability">11. Observability Stack</a></li>
+    <li><a href="#eval">12. Eval Framework</a></li>
+    <li><a href="#cost-latency">13. Cost & Latency Targets</a></li>
+    <li><a href="#failure-modes">14. Failure Modes & Mitigations</a></li>
+    <li><a href="#tech-stack">15. Tech Stack</a></li>
+    <li><a href="#repo-structure">16. Repository Structure</a></li>
+    <li><a href="#roadmap">17. V1 → V2 → V3 Roadmap</a></li>
+    <li><a href="#open-questions">18. Open Questions for Onemyle Leadership</a></li>
+  </ul>
+</div>
+
+<!-- ====================================================================== -->
+<div class="part">1. Overview</div>
+
+<h2 id="overview">What MatchScout Does</h2>
+
+<p><strong>MatchScout</strong> is an AI-powered match-quality predictor for Onemyle's two-sided marketplace. Given a creator and a business, it predicts whether they're likely to have a successful collaboration — outputting a probability score, reasoning citing specific signals, risk factors, and a recommended action.</p>
+
+<h3>One-line description</h3>
+<blockquote>
+"For Onemyle's marketplace operations team, MatchScout is an AI early-warning system that scores creator-business match quality before introduction, so we can recommend better matches, flag risky introductions, and reduce double-sided churn."
+</blockquote>
+
+<h3>Status</h3>
+
+<table>
+  <thead><tr><th>Item</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>Engineering build</td><td>In active development (Week 0 of 4)</td></tr>
+    <tr><td>Data</td><td>Synthetic only (Faker-generated)</td></tr>
+    <tr><td>Production deployment</td><td>Pending Onemyle roadmap prioritization</td></tr>
+    <tr><td>Owner</td><td>Rajesh Ramani (Investor & pro bono Product/AI Lead at Onemyle)</td></tr>
+    <tr><td>Repository</td><td>github.com/rrvenkatrama/agentic_ai_projects (matchscout-onemyle)</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">2. Problem Statement</div>
+
+<h2 id="problem">The Problem MatchScout Solves</h2>
+
+<h3>Marketplace dynamics</h3>
+
+<p>Onemyle is a two-sided marketplace. Both sides depend on match quality:</p>
+
+<ul>
+  <li><strong>Creators</strong> waste effort pitching businesses that aren't a real fit → frustration, churn</li>
+  <li><strong>Businesses</strong> get poor content from mismatched creators → frustration, churn</li>
+  <li><strong>Marketplace</strong> loses transactions, GMV, reputation</li>
+</ul>
+
+<p>Today, matching is largely manual or browse-based. Both sides spend time evaluating fit. Bad matches happen — and they cause double-sided churn.</p>
+
+<h3>What we're building toward</h3>
+
+<p>An AI layer that scores match quality automatically — informing recommendations, surfacing risky introductions for proactive support, and improving the overall marketplace experience.</p>
+
+<!-- ====================================================================== -->
+<div class="part">3. Scope (V1 PoC)</div>
+
+<h2 id="scope">V1 PoC Scope</h2>
+
+<h3>In Scope</h3>
+
+<ul>
+  <li>Synthetic marketplace data (creators + businesses + historical matches)</li>
+  <li>3-stage cascade pipeline (rules filter → vector similarity → LLM agent)</li>
+  <li>LangGraph agent with structured output (probability, reasoning, risk_flags, recommendation)</li>
+  <li>Multi-layer eval framework (Ragas + DeepEval + Promptfoo + regression suite)</li>
+  <li>LangSmith tracing + LangFuse self-hosted dashboard</li>
+  <li>Cost-per-prediction tracking</li>
+  <li>Full PM artifact set (PRD, ICP, eval plan, GTM brief, risk register)</li>
+  <li>CLI / function-call interface (no web UI)</li>
+</ul>
+
+<h3>Out of Scope (V2+ territory)</h3>
+
+<ul>
+  <li>FastAPI service wrapper (V2)</li>
+  <li>Pinecone / managed vector DB (V2)</li>
+  <li>Multi-cloud LLM routing (V2)</li>
+  <li>Reliability patterns: circuit breaker, fallback (V2)</li>
+  <li>Real Onemyle data integration (V2)</li>
+  <li>Production deployment (V3)</li>
+  <li>Web UI / dashboard for marketplace ops (V3)</li>
+  <li>Real-time triggering on platform events (V3)</li>
+  <li>Cascade pre-computation + caching (V3)</li>
+</ul>
+
+<!-- ====================================================================== -->
+<div class="part">4. Architecture (3-Stage Cascade)</div>
+
+<h2 id="architecture">3-Stage Cascade Pipeline</h2>
+
+<p>Industry-standard architecture for marketplace AI. Each stage filters by an order of magnitude, keeping cost and latency manageable while preserving premium reasoning quality where it matters most.</p>
+
+<div class="ascii-diagram">
+┌──────────────────────────────────────────────────────────────────┐
+│                     ALL POSSIBLE PAIRS                            │
+│       400 creators × 300 businesses = 120,000 possible pairs      │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  STAGE 1 — HARD FILTERS (rules-based)                             │
+│  • Same OR adjacent category                                       │
+│  • Content type overlap (creator's outputs ∩ business's needs)    │
+│  • Location compatible (same metro OR remote-OK)                  │
+│  • Budget overlap (creator's range ∩ business's range)            │
+│  • Both accounts active in last 30 days                            │
+│                                                                     │
+│  Cost:    ~$0 (no LLM)        Latency: ~10ms (DB query)            │
+│  Reduces: 120K → ~5-10K compatible pairs                          │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  STAGE 2 — VECTOR SIMILARITY RANKING                              │
+│  • Embed creator profile (sub-categories + niche tags +           │
+│    content types as text)                                          │
+│  • Embed business brief (needs + niche tags)                      │
+│  • Cosine similarity → rank top 20-30 candidates per query        │
+│  • Uses sentence-transformers (all-MiniLM-L6-v2) locally          │
+│                                                                     │
+│  Cost:    ~$0 (embeddings cached)   Latency: ~50ms                │
+│  Reduces: ~5-10K → top 20 candidates                              │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  STAGE 3 — LLM AGENT (PREMIUM REASONING)                          │
+│  • LangGraph state machine                                         │
+│  • Claude Sonnet 4.6 (primary) — premium model                    │
+│  • Analyzes top 10-20 candidates with full context                │
+│  • Outputs: probability + reasoning + risk_flags + action         │
+│                                                                     │
+│  Cost:    ~$0.18 per pair          Latency: ~2 sec per pair       │
+│  Per query (top 20): ~$3.60 + ~10s (sequential)                   │
+│  Per query (parallelized): ~$3.60 + ~3s (with concurrency)        │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                     Final ranked matches
+                     with full reasoning
+</div>
+
+<h3>Why this architecture (vs alternatives)</h3>
+
+<table>
+  <thead><tr><th>Alternative</th><th>Why we rejected</th></tr></thead>
+  <tbody>
+    <tr><td>Pure LLM (no filters)</td><td>120K pairs × $0.18 = $21,600/run. Not viable.</td></tr>
+    <tr><td>Pure rules (no LLM)</td><td>Misses nuance. No reasoning. No "why this match" explanation.</td></tr>
+    <tr><td>Pure ML (gradient boost / NN)</td><td>Requires labeled training data Onemyle doesn't have yet. No explainability.</td></tr>
+    <tr><td>Pure vector similarity</td><td>Catches semantic fit but misses business context, budget, location. No reasoning.</td></tr>
+    <tr><td><strong>3-stage cascade</strong></td><td><strong>Best of all: fast + cheap + smart + explainable.</strong></td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">5. Components — Detailed</div>
+
+<h2 id="components">Component Breakdown</h2>
+
+<h3>filter.py — Stage 1 (Hard Filters)</h3>
+
+<pre><code>def stage1_filter(creator, business) -> bool:
+    """Pure function — returns True if pair is compatible enough to consider."""
+
+    # Category compatibility (with adjacency map)
+    if creator.primary_category != business.primary_category:
+        if creator.primary_category not in ADJACENT_MAP[business.primary_category]:
+            if business.primary_category not in (creator.secondary_categories or []):
+                return False
+
+    # Content type overlap
+    if not set(creator.content_types) & set(business.content_needs):
+        return False
+
+    # Location compatibility
+    if not creator.remote_friendly and creator.location != business.location:
+        return False
+
+    # Budget overlap
+    if creator.budget_range[1] < business.budget_range[0]: return False
+    if creator.budget_range[0] > business.budget_range[1]: return False
+
+    # Activity check
+    if not (creator.active_30d and business.active_30d): return False
+
+    return True</code></pre>
+
+<p>No LLM calls. Pure rules. Runs in microseconds per pair.</p>
+
+<h3>ranker.py — Stage 2 (Vector Similarity)</h3>
+
+<pre><code>from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")  # local, free, fast
+
+def creator_text(creator):
+    """Textual representation for embedding."""
+    return f"{creator.primary_category} {' '.join(creator.subcategories)} " \
+           f"{' '.join(creator.niche_tags)} {' '.join(creator.content_types)}"
+
+def business_text(business):
+    return f"{business.primary_category} {' '.join(business.subcategories)} " \
+           f"{' '.join(business.niche_tags)} {' '.join(business.content_needs)}"
+
+def stage2_rank(business, candidates, top_k=20):
+    """Rank filtered candidates by cosine similarity to business."""
+    business_vec = model.encode(business_text(business))
+    candidate_vecs = model.encode([creator_text(c) for c in candidates])
+
+    similarities = cosine_similarity([business_vec], candidate_vecs)[0]
+    ranked = sorted(zip(candidates, similarities), key=lambda x: -x[1])
+    return ranked[:top_k]</code></pre>
+
+<p>Embeddings can be pre-computed and cached. Uses sentence-transformers (free, local, no API costs).</p>
+
+<h3>agent.py — Stage 3 (LangGraph LLM Agent)</h3>
+
+<pre><code>from langgraph.graph import StateGraph
+from anthropic import Anthropic
+from pydantic import BaseModel
+
+class MatchPrediction(BaseModel):
+    success_probability: float       # 0.0 - 1.0
+    reasoning: str                    # explanation citing specific signals
+    risk_factors: list[str]           # e.g., ["budget_mismatch", "first_time_business"]
+    recommended_action: str           # "introduce" | "introduce_with_clarification" |
+                                      # "hold_pending_review" | "do_not_introduce"
+
+# LangGraph state machine
+class AgentState(TypedDict):
+    creator: dict
+    business: dict
+    compatibility_signals: dict       # computed signals
+    prediction: MatchPrediction
+
+def load_profiles(state): ...
+def compute_signals(state): ...       # location overlap, budget alignment, etc.
+def call_llm(state): ...              # Claude reasoning with structured output
+def validate_output(state): ...       # ensure prediction matches schema
+
+graph = StateGraph(AgentState)
+graph.add_node("load", load_profiles)
+graph.add_node("signals", compute_signals)
+graph.add_node("predict", call_llm)
+graph.add_node("validate", validate_output)
+graph.add_edge("load", "signals")
+graph.add_edge("signals", "predict")
+graph.add_edge("predict", "validate")
+graph.set_entry_point("load")
+graph.set_finish_point("validate")</code></pre>
+
+<p>Structured output enforced via Pydantic. Multi-step state machine allows targeted retries (only re-run "predict" if validation fails, not re-run "load").</p>
+
+<h3>pipeline.py — Orchestrator</h3>
+
+<pre><code>def find_matches_for_business(business_id, top_k=5):
+    """Run the full cascade for a single business query."""
+    business = load_business(business_id)
+    all_creators = load_all_creators()
+
+    # Stage 1
+    candidates = [c for c in all_creators if stage1_filter(c, business)]
+
+    # Stage 2
+    ranked = stage2_rank(business, candidates, top_k=20)
+
+    # Stage 3 (parallelized for latency)
+    predictions = await asyncio.gather(*[
+        agent.invoke({"creator": c, "business": business})
+        for c, _similarity in ranked
+    ])
+
+    # Sort by predicted success probability
+    final = sorted(predictions, key=lambda p: -p.success_probability)
+    return final[:top_k]</code></pre>
+
+<!-- ====================================================================== -->
+<div class="part">6. Data Model</div>
+
+<h2 id="data-model">Entity Schemas</h2>
+
+<h3>Creator</h3>
+
+<pre><code>{
+  "id": "creator_001",
+  "name": "Maya Chen",
+  "primary_category": "food_beverage",
+  "primary_subcategories": ["fine_dining", "specialty_foods"],
+  "secondary_categories": ["travel"],
+  "content_types": ["reels", "photography"],
+  "location": "Boston, MA",
+  "remote_friendly": True,
+  "follower_count": 42000,
+  "engagement_rate": 0.038,
+  "past_gigs_completed": 23,
+  "avg_rating": 4.7,
+  "budget_range_per_gig": [400, 1200],
+  "niche_tags": ["fine_dining", "natural_lighting", "magazine_quality"],
+  "response_time_hours_avg": 3.2,
+  "active_in_last_30_days": True
+}</code></pre>
+
+<h3>Business</h3>
+
+<pre><code>{
+  "id": "biz_001",
+  "name": "Tavola Restaurant",
+  "primary_category": "food_beverage",
+  "primary_subcategories": ["fine_dining"],
+  "secondary_categories": [],
+  "content_needs": ["reels", "photography"],
+  "location": "Boston, MA",
+  "remote_acceptable": False,
+  "business_size": "small",
+  "past_creators_hired": 8,
+  "avg_creator_rating": 4.5,
+  "budget_range_per_gig": [500, 1000],
+  "niche_tags": ["fine_dining", "italian", "wine_pairing"],
+  "current_gigs_open": 2,
+  "active_in_last_30_days": True,
+  "preferred_creator_size": "mid"
+}</code></pre>
+
+<h3>Historical Match (for golden set)</h3>
+
+<pre><code>{
+  "id": "match_001",
+  "creator_id": "creator_001",
+  "business_id": "biz_001",
+  "introduced_at": "2026-04-01",
+  "outcome": "successful",          # successful | failed | no_response
+  "outcome_reason": "completed_3_gigs_excellent_reviews",
+  "creator_rating": 5,
+  "business_rating": 5,
+  "gig_count": 3,
+  "total_paid": 2400
+}</code></pre>
+
+<h3>Prediction Output (MatchScout's output)</h3>
+
+<pre><code>{
+  "creator_id": "creator_001",
+  "business_id": "biz_001",
+  "success_probability": 0.87,
+  "reasoning": "Strong location and category fit. Creator's fine dining
+                specialty matches Tavola's positioning. Budget ranges overlap
+                ($500-1000 ∩ $400-1200). Creator has 23 past gigs with avg
+                rating 4.7, suggesting reliability. Risk: creator typically
+                works with mid-tier restaurants, Tavola is upscale.",
+  "risk_factors": ["budget_alignment_borderline", "creator_tier_match"],
+  "recommended_action": "introduce_with_brief_alignment",
+  "confidence": 0.82,
+  "predicted_at": "2026-05-09T14:30:00Z",
+  "model_version": "claude-sonnet-4-6",
+  "prompt_version": "v1.2",
+  "cost_usd": 0.18
+}</code></pre>
+
+<!-- ====================================================================== -->
+<div class="part">7. Category Schema</div>
+
+<h2 id="category-schema">8 Primary Categories</h2>
+
+<table>
+  <thead><tr><th>Category</th><th>Business-side examples</th><th>Creator-side examples</th></tr></thead>
+  <tbody>
+    <tr><td>Food & Beverage</td><td>Restaurants, cafes, bakeries, food trucks</td><td>Food reviewers, photographers, recipe creators</td></tr>
+    <tr><td>Auto</td><td>Dealers, repair, parts, detailers</td><td>Vehicle reviewers, EV bloggers, automotive videographers</td></tr>
+    <tr><td>Retail & Shopping</td><td>Clothing stores, electronics, big box, boutiques</td><td>Haul creators, shopping bloggers, lifestyle influencers</td></tr>
+    <tr><td>Beauty & Wellness</td><td>Salons, spas, dermatology, beauty brands</td><td>Beauty bloggers, makeup artists, skincare reviewers</td></tr>
+    <tr><td>Fashion</td><td>Clothing brands, designers, accessories, footwear</td><td>Fashion bloggers, stylists, lookbook creators</td></tr>
+    <tr><td>Fitness & Sports</td><td>Gyms, yoga studios, sports retail, coaches</td><td>Fitness influencers, trainers, gear reviewers</td></tr>
+    <tr><td>Travel & Hospitality</td><td>Hotels, B&Bs, tour operators, attractions</td><td>Travel bloggers, hotel reviewers, destination photographers</td></tr>
+    <tr><td>Home & Real Estate</td><td>Furniture, home improvement, real estate agencies</td><td>Home decor bloggers, DIY creators, real estate vloggers</td></tr>
+  </tbody>
+</table>
+
+<h3>Adjacent Category Map</h3>
+
+<pre><code>ADJACENT_MAP = {
+    "food_beverage": ["travel", "retail"],
+    "auto": [],  # mostly stand-alone
+    "retail": ["fashion", "beauty", "home"],
+    "beauty": ["fashion", "wellness"],
+    "fashion": ["beauty", "retail"],
+    "fitness": ["wellness", "beauty"],
+    "travel": ["food_beverage", "hospitality"],
+    "home": ["retail"],
+}</code></pre>
+
+<p>Adjacency allows soft cross-category matching (e.g., a food creator can match with travel businesses for food-tourism content).</p>
+
+<!-- ====================================================================== -->
+<div class="part">8. End-to-End Data Flow</div>
+
+<h2 id="data-flow">Data Flow Through the System</h2>
+
+<div class="ascii-diagram">
+┌──────────────────────────┐
+│  Synthetic Data (Faker)  │
+│  data/generate_marketplace.py │
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│   data/creators.csv     data/businesses.csv     data/matches.csv  │
+└────────────┬─────────────────────────────────────────────────────┘
+             │ (loaded once at startup)
+             ▼
+┌──────────────────────────┐
+│   In-memory data store   │
+│   (creators_dict, etc.)  │
+└────────────┬─────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────┐
+│ INPUT: business_id (or creator_id for reverse lookup)   │
+│ Example: "Find top creators for biz_001"                │
+└────────────┬────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│  Stage 1 — filter.py     │   filters out 95% of pairs
+│  Pure Python, ~10ms      │   based on rules
+└────────────┬─────────────┘
+             │ (~5-10K candidates)
+             ▼
+┌──────────────────────────┐
+│  Stage 2 — ranker.py     │   semantic similarity
+│  sentence-transformers   │   ~50ms
+│  cosine similarity       │
+└────────────┬─────────────┘
+             │ (top 20 candidates)
+             ▼
+┌──────────────────────────┐
+│  Stage 3 — agent.py      │   premium reasoning
+│  LangGraph + Claude      │   ~2s per pair
+│  parallelized            │   (~3-4s total for 20 pairs)
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ OUTPUT: top 5 ranked predictions with reasoning                   │
+│ Each: {creator_id, score, reasoning, risk_factors, action}        │
+└──────────────────────────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│  Logged to:              │
+│  • LangSmith (traces)    │
+│  • LangFuse (cost/lat.)  │
+│  • Local CSV (audit)     │
+└──────────────────────────┘
+</div>
+
+<!-- ====================================================================== -->
+<div class="part">9. Runtime Model</div>
+
+<h2 id="runtime">When Does What Run?</h2>
+
+<h3>For the V1 PoC</h3>
+
+<table>
+  <thead><tr><th>Component</th><th>Trigger</th><th>Frequency</th></tr></thead>
+  <tbody>
+    <tr><td>Data generation</td><td>Manual run (one-time setup)</td><td>Once during dev; rarely after</td></tr>
+    <tr><td>Embedding pre-computation</td><td>Manual run (one-time setup)</td><td>Once after data generation; rerun if data changes</td></tr>
+    <tr><td>Stage 1 filter</td><td>On every prediction request</td><td>Per query</td></tr>
+    <tr><td>Stage 2 ranker</td><td>On every prediction request</td><td>Per query</td></tr>
+    <tr><td>Stage 3 agent</td><td>On every prediction request (top 20 candidates)</td><td>~20 LLM calls per query</td></tr>
+    <tr><td>Eval suite</td><td>Manually via <code>pytest</code> OR on every git push</td><td>Per code change</td></tr>
+    <tr><td>LangSmith logging</td><td>Automatic on every LLM call</td><td>Continuous</td></tr>
+    <tr><td>LangFuse dashboard</td><td>Pull from log data</td><td>Continuous</td></tr>
+  </tbody>
+</table>
+
+<h3>For V2 / V3 (production)</h3>
+
+<table>
+  <thead><tr><th>Trigger pattern</th><th>What runs</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>On creator signup</td><td>Stage 1+2+3 to surface "top businesses for you"</td><td>Activation moment</td></tr>
+    <tr><td>On business gig post</td><td>Stage 1+2+3 to surface "top creators for this gig"</td><td>Discovery moment</td></tr>
+    <tr><td>On match initiation (apply / invite)</td><td>Stage 3 only (premium scoring on this specific pair)</td><td>Decision moment — highest leverage</td></tr>
+    <tr><td>On profile view</td><td>Cached score OR Stage 3 if stale</td><td>Browse experience</td></tr>
+    <tr><td>Nightly batch</td><td>Pre-compute Stage 2 embeddings for new entities</td><td>Keep recommendation cache fresh</td></tr>
+    <tr><td>Weekly batch</td><td>Re-run all evals on new completed matches</td><td>Quality regression detection</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">10. Trigger Patterns</div>
+
+<h2 id="triggers">V1 (PoC) vs V2 (Production)</h2>
+
+<h3>V1 — Manual / On-Demand</h3>
+
+<p>For the PoC, MatchScout is invoked manually:</p>
+
+<pre><code># From CLI
+python -m matchscout.pipeline --business biz_001 --top-k 5
+
+# From Python
+from matchscout import predict_matches
+results = predict_matches(business_id="biz_001", top_k=5)
+
+# From eval framework
+python -m eval.run_golden_set    # runs cascade against all golden set entries</code></pre>
+
+<p>No automated triggering. No web service. CLI / function-call interface only.</p>
+
+<h3>V2 — Production Triggers (documented, not built)</h3>
+
+<p>For productionization, three high-value trigger moments:</p>
+
+<ol>
+  <li><strong>On match initiation</strong> — when creator applies or business invites. Premium scoring before introduction. Highest leverage moment.</li>
+  <li><strong>On gig post</strong> — when business posts a new gig. Surface top 5 creator recommendations. Proactive.</li>
+  <li><strong>On profile view</strong> — when user views a candidate's profile. On-demand match score badge. Discovery experience.</li>
+</ol>
+
+<p>Plus background jobs for cache freshness and regression detection.</p>
+
+<!-- ====================================================================== -->
+<div class="part">11. Observability</div>
+
+<h2 id="observability">Observability Stack</h2>
+
+<h3>LangSmith — LLM tracing</h3>
+
+<p>Every prediction creates a LangSmith trace showing:</p>
+<ul>
+  <li>Input (creator + business JSON)</li>
+  <li>Each LangGraph node execution (load → signals → predict → validate)</li>
+  <li>Each LLM call's prompt + response</li>
+  <li>Token counts, latency, cost</li>
+  <li>Errors / retries</li>
+</ul>
+
+<p>Lets us debug "why did the agent score this match X?" by inspecting the full trace.</p>
+
+<h3>LangFuse — Self-hosted dashboard</h3>
+
+<p>Aggregates traces into dashboards:</p>
+<ul>
+  <li>Cost per prediction (rolling 7-day average)</li>
+  <li>p50 / p95 / p99 latency</li>
+  <li>Predictions per day</li>
+  <li>Quality metrics (Ragas faithfulness over time)</li>
+  <li>Drift alerts (if metrics shift unexpectedly)</li>
+</ul>
+
+<h3>Local logging</h3>
+
+<p>CSV append-log for every prediction (audit trail):</p>
+
+<pre><code>predicted_at,creator_id,business_id,probability,confidence,prompt_version,cost_usd
+2026-05-09T14:30:00Z,creator_001,biz_001,0.87,0.82,v1.2,0.18
+...</code></pre>
+
+<!-- ====================================================================== -->
+<div class="part">12. Eval Framework</div>
+
+<h2 id="eval">Multi-Layer Eval</h2>
+
+<h3>Golden set</h3>
+
+<p>50 hand-labeled match outcomes. Each entry: creator, business, expected outcome (success/failure), expected reasoning theme.</p>
+
+<h3>Layer 1 — Accuracy (golden set)</h3>
+
+<table>
+  <thead><tr><th>Metric</th><th>Target</th><th>Kill threshold</th></tr></thead>
+  <tbody>
+    <tr><td>Precision (% of "good match" predictions that were actually good)</td><td>≥ 75%</td><td>< 55%</td></tr>
+    <tr><td>Recall (% of actually-good matches that we surfaced)</td><td>≥ 65%</td><td>< 45%</td></tr>
+    <tr><td>F1 (harmonic mean)</td><td>≥ 70%</td><td>< 50%</td></tr>
+  </tbody>
+</table>
+
+<h3>Layer 2 — Faithfulness (Ragas)</h3>
+
+<p>Measures: when the agent's reasoning cites a signal, is that signal actually present in the input data?</p>
+
+<pre><code>from ragas.metrics import faithfulness
+
+score = faithfulness(
+    answer=prediction.reasoning,
+    context=[creator_data, business_data]
+)
+
+# Threshold: faithfulness ≥ 0.85
+# Catches hallucinations (agent inventing signals not present in data)</code></pre>
+
+<h3>Layer 3 — DeepEval assertions</h3>
+
+<pre><code>def test_no_invented_metrics():
+    """Agent shouldn't reference data fields that don't exist."""
+    output = agent.predict(creator_001, biz_001)
+    forbidden_terms = ["instagram_dm", "tiktok_dm", "phone_call",
+                       "whatsapp", "personal_email"]  # we don't track these
+    for term in forbidden_terms:
+        assert term not in output.reasoning
+
+def test_recommended_action_valid():
+    """Action must be one of the allowed values."""
+    output = agent.predict(creator_001, biz_001)
+    assert output.recommended_action in [
+        "introduce", "introduce_with_clarification",
+        "hold_pending_review", "do_not_introduce"
+    ]
+
+def test_probability_in_range():
+    """Probability must be in [0, 1]."""
+    output = agent.predict(creator_001, biz_001)
+    assert 0.0 <= output.success_probability <= 1.0</code></pre>
+
+<h3>Layer 4 — Promptfoo A/B testing</h3>
+
+<p>3 prompt variants tested side-by-side on the golden set:</p>
+
+<pre><code># promptfooconfig.yaml
+prompts:
+  - prompts/v1_basic.txt
+  - prompts/v2_with_role.txt
+  - prompts/v3_with_examples.txt    # few-shot
+
+tests:
+  - vars: {creator: ${creator_001_data}, business: ${biz_001_data}}
+    assert:
+      - type: faithfulness
+        threshold: 0.85
+      - type: latency
+        threshold: 5000  # ms
+      - type: cost
+        threshold: 0.30  # USD per call</code></pre>
+
+<h3>Layer 5 — Regression suite (CI)</h3>
+
+<pre><code># .github/workflows/eval.yml
+on: [push, pull_request]
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: pip install -r requirements.txt
+      - run: deepeval test eval/        # unit-style assertions
+      - run: python eval/run_golden_set.py
+      - run: python eval/check_thresholds.py
+        # FAILS if precision < 0.55 OR faithfulness < 0.80 OR cost > $0.30</code></pre>
+
+<p>Any PR that drops quality below thresholds is blocked.</p>
+
+<!-- ====================================================================== -->
+<div class="part">13. Cost & Latency Targets</div>
+
+<h2 id="cost-latency">Performance Budgets</h2>
+
+<table>
+  <thead><tr><th>Metric</th><th>Target (V1)</th><th>Stretch (V2)</th></tr></thead>
+  <tbody>
+    <tr><td>Cost per prediction (single pair)</td><td>≤ $0.20</td><td>≤ $0.10 (with model routing)</td></tr>
+    <tr><td>Cost per query (top 20 cascade)</td><td>≤ $5.00</td><td>≤ $2.00</td></tr>
+    <tr><td>Latency: Stage 1 (filter)</td><td>≤ 50ms</td><td>≤ 20ms</td></tr>
+    <tr><td>Latency: Stage 2 (vector)</td><td>≤ 100ms</td><td>≤ 50ms (with cached embeddings)</td></tr>
+    <tr><td>Latency: Stage 3 (single LLM call)</td><td>≤ 3 sec</td><td>≤ 1.5 sec (with smaller model when possible)</td></tr>
+    <tr><td>Latency: full query (parallelized)</td><td>≤ 5 sec</td><td>≤ 2 sec</td></tr>
+    <tr><td>Faithfulness (Ragas)</td><td>≥ 0.85</td><td>≥ 0.92</td></tr>
+    <tr><td>Precision (golden set)</td><td>≥ 75%</td><td>≥ 85%</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">14. Failure Modes</div>
+
+<h2 id="failure-modes">Risks & Mitigations</h2>
+
+<table>
+  <thead><tr><th>Failure mode</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>LLM hallucinates data ("Creator has 100K followers" when real is 40K)</td><td>Ragas faithfulness gating + DeepEval assertions on forbidden terms</td></tr>
+    <tr><td>Cost runaway (cascade misconfigured, scoring too many pairs)</td><td>Per-query cost cap ($5 max); kill switch if hit</td></tr>
+    <tr><td>Quality regression after prompt change</td><td>Regression suite blocks PR before merge</td></tr>
+    <tr><td>Vendor lock-in to Anthropic</td><td>Abstract LLM call behind interface; Bedrock + Claude alternative documented for V2</td></tr>
+    <tr><td>Bias against new creators (cold-start)</td><td>Risk register: track recall by creator tenure; add "new creator boost" if needed</td></tr>
+    <tr><td>Bias against small businesses (favor known)</td><td>Same — track recall by business tenure</td></tr>
+    <tr><td>Synthetic data doesn't reflect reality</td><td>V2 milestone: validate against any real Onemyle match data</td></tr>
+    <tr><td>Marketplace disintermediation (parties go off-platform)</td><td>Out of scope for MatchScout; flagged for product team</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">15. Tech Stack</div>
+
+<h2 id="tech-stack">Tech Stack Summary</h2>
+
+<table>
+  <thead><tr><th>Layer</th><th>Tool</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Language</td><td>Python 3.13</td><td>Existing project standard</td></tr>
+    <tr><td>Synthetic data</td><td>Faker</td><td>Industry standard for synthetic data</td></tr>
+    <tr><td>Agent framework</td><td>LangGraph</td><td>State machine for multi-step prediction</td></tr>
+    <tr><td>LLM provider</td><td>Anthropic Claude (Sonnet 4.6)</td><td>Premium reasoning at moderate cost</td></tr>
+    <tr><td>Output validation</td><td>Pydantic</td><td>Structured output with type safety</td></tr>
+    <tr><td>Embeddings</td><td>sentence-transformers (all-MiniLM-L6-v2)</td><td>Free, local, fast</td></tr>
+    <tr><td>Vector ops</td><td>numpy / scikit-learn cosine_similarity</td><td>Standard numerical libraries</td></tr>
+    <tr><td>Tracing</td><td>LangSmith</td><td>Industry standard for LLM observability</td></tr>
+    <tr><td>Dashboards</td><td>LangFuse (self-hosted)</td><td>Open-source alternative; full data control</td></tr>
+    <tr><td>Faithfulness eval</td><td>Ragas</td><td>Standard for RAG/grounding measurement</td></tr>
+    <tr><td>LLM unit tests</td><td>DeepEval</td><td>pytest-style assertions for LLM outputs</td></tr>
+    <tr><td>Prompt A/B testing</td><td>Promptfoo</td><td>Standard for prompt experiment design</td></tr>
+    <tr><td>CI</td><td>GitHub Actions (or local script for now)</td><td>Industry standard</td></tr>
+    <tr><td>Concurrency</td><td>asyncio</td><td>For parallelizing Stage 3 LLM calls</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="part">16. Repository Structure</div>
+
+<h2 id="repo-structure">File Layout</h2>
+
+<pre><code>matchscout-onemyle/
+├── DESIGN.html                  # this document
+├── README.md                    # project overview, "Onemyle PoC by Rajesh"
+├── requirements.txt
+├── .env.example
+│
+├── data/
+│   ├── generate_marketplace.py  # Faker-based generator
+│   ├── creators.csv             # 400 synthetic creators
+│   ├── businesses.csv           # 300 synthetic businesses
+│   ├── matches.csv              # 150 synthetic historical matches
+│   └── categories.json          # 8 categories + sub-categories + adjacency map
+│
+├── matchscout/
+│   ├── __init__.py
+│   ├── filter.py                # Stage 1: rules-based hard filter
+│   ├── ranker.py                # Stage 2: vector similarity
+│   ├── agent.py                 # Stage 3: LangGraph + Claude
+│   ├── pipeline.py              # orchestrates Stage 1 → 2 → 3
+│   ├── observability.py         # LangSmith + LangFuse + local logging
+│   └── schemas.py               # Pydantic models for predictions
+│
+├── prompts/
+│   ├── v1_basic.txt
+│   ├── v2_with_role.txt
+│   └── v3_with_examples.txt
+│
+├── eval/
+│   ├── golden_set.json          # 50 hand-labeled matches
+│   ├── build_golden.py          # interactive labeling tool
+│   ├── ragas_eval.py            # faithfulness scoring
+│   ├── deepeval_tests.py        # LLM unit tests
+│   ├── promptfoo.yaml           # A/B test config
+│   ├── run_golden_set.py        # full eval runner
+│   ├── check_thresholds.py      # CI gate
+│   └── regression_suite.py      # complete regression script
+│
+├── pm/
+│   ├── 01_prd.md                # 1-page PRD
+│   ├── 02_icp.md                # ICP for both marketplace sides
+│   ├── 03_eval_plan.md          # eval thresholds + production monitoring
+│   ├── 04_gtm_brief.md          # positioning, pricing, rollout
+│   ├── 05_risk_register.md      # AI-specific risks + mitigations
+│   └── 06_initiative_summary.md # Onemyle PoC summary doc
+│
+└── .github/
+    └── workflows/
+        └── eval.yml             # CI eval gate
+</code></pre>
+
+<!-- ====================================================================== -->
+<div class="part">17. Roadmap</div>
+
+<h2 id="roadmap">V1 → V2 → V3 Evolution</h2>
+
+<h3>V1 — Proof of Concept (current)</h3>
+<ul>
+  <li>Synthetic data only</li>
+  <li>CLI / function-call interface</li>
+  <li>Single LLM provider (Claude)</li>
+  <li>3-stage cascade with manual triggers</li>
+  <li>Eval framework + observability</li>
+  <li>Full PM artifact set</li>
+</ul>
+
+<h3>V2 — Productionization (pending Onemyle decision)</h3>
+<ul>
+  <li>FastAPI service wrapper</li>
+  <li>Pinecone (or managed vector DB) for embeddings at scale</li>
+  <li>Multi-cloud LLM routing (Bedrock primary, OpenAI fallback)</li>
+  <li>Reliability patterns: retries, circuit breaker, graceful degradation</li>
+  <li>Real Onemyle data integration</li>
+  <li>Trigger plumbing: signup hooks, gig post hooks, profile view hooks</li>
+  <li>Cascade pre-computation + Redis caching</li>
+  <li>Per-tenant cost budgets + alerts</li>
+</ul>
+
+<h3>V3 — Marketplace AI Platform (long-term vision)</h3>
+<ul>
+  <li>Web UI for marketplace ops team</li>
+  <li>A/B testing framework for prompt iterations in production</li>
+  <li>Feedback loop: completed match outcomes auto-feed eval set</li>
+  <li>Multi-armed bandit for model selection</li>
+  <li>Fairness monitoring dashboards (creator equity, opportunity distribution)</li>
+  <li>Expansion to additional AI-powered marketplace features (smart pricing, fraud detection, content moderation)</li>
+</ul>
+
+<!-- ====================================================================== -->
+<div class="part">18. Open Questions</div>
+
+<h2 id="open-questions">For Onemyle Leadership Discussion</h2>
+
+<table>
+  <thead><tr><th>Question</th><th>Why it matters</th></tr></thead>
+  <tbody>
+    <tr><td>Do you have any historical match data we could later use for model validation?</td><td>Determines if V2 can use real data vs continued synthetic</td></tr>
+    <tr><td>What's the priority order for trigger patterns (gig post vs signup vs profile view)?</td><td>Drives V2 feature sequencing</td></tr>
+    <tr><td>What's the acceptable hallucination rate for match reasoning?</td><td>Sets eval thresholds; informs human-in-loop design</td></tr>
+    <tr><td>Should match scores be visible to creators / businesses or internal-only?</td><td>UX decision with transparency / trust implications</td></tr>
+    <tr><td>What's the budget envelope for AI features in 2026?</td><td>Constrains model selection (Sonnet vs Opus vs Haiku)</td></tr>
+    <tr><td>Is there appetite for a closed-alpha test with 5-10 marketplace participants?</td><td>Gates V2 production rollout planning</td></tr>
+    <tr><td>Are there fairness concerns we should design for (creator equity, geographic distribution)?</td><td>Informs risk register + monitoring requirements</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  MatchScout — Design Document v1.0 · 2026-05-09 · By Rajesh Ramani · Onemyle Investor & Pro Bono Product/AI Lead
+</footer>
+
+</body>
+</html>
