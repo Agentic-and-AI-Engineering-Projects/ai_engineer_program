@@ -79,6 +79,7 @@
     <li><a href="#repo-structure">16. Repository Structure</a></li>
     <li><a href="#roadmap">17. V1 → V2 → V3 Roadmap</a></li>
     <li><a href="#open-questions">18. Open Questions for Onemyle Leadership</a></li>
+    <li><a href="#appendix-a-story">Appendix A — The End-to-End Story</a></li>
   </ul>
 </div>
 
@@ -902,6 +903,186 @@ jobs:
     <tr><td>Are there fairness concerns we should design for (creator equity, geographic distribution)?</td><td>Informs risk register + monitoring requirements</td></tr>
   </tbody>
 </table>
+
+<!-- ====================================================================== -->
+<div class="part">Appendix A — The End-to-End Story</div>
+
+<h2 id="appendix-a-story">A Narrative Walk-Through of MatchScout</h2>
+
+<p>This appendix tells the same system as the rest of the document — but as a story. Easier to understand if you're new to the architecture, useful as an interview narrative, and a sanity check that the design coheres.</p>
+
+<h3>The setup</h3>
+
+<p>Imagine <strong>Maya</strong>, a Boston food photographer. And <strong>Tavola</strong>, a Boston fine-dining restaurant looking for photography. Both signed up to Onemyle. Neither knows the other exists.</p>
+
+<p>Onemyle has thousands of creators and thousands of businesses across 8 categories. The platform team wants AI to surface good matches — but with thousands on each side, brute-force scoring would cost a fortune and be too slow.</p>
+
+<p>So they build <strong>MatchScout</strong> — a 4-stage pipeline that finds quality matches efficiently.</p>
+
+<p>Before MatchScout can run, the team prepares two things:</p>
+
+<ol>
+  <li><strong>Embeddings</strong> — every creator and business profile gets converted to a numerical vector (a "meaning fingerprint") using a free local model. Stored in a database. Done once, refreshed when profiles change.</li>
+  <li><strong>Golden test set</strong> — 50 historical creator-business pairs, hand-labeled with their actual outcomes (success/failure). This becomes the answer key for measuring whether MatchScout is any good.</li>
+</ol>
+
+<h3>A user moment — Tavola posts a gig</h3>
+
+<p>Tavola posts: <em>"Need food photography for our new tasting menu. Boston, $500-$1000."</em></p>
+
+<p>This triggers MatchScout. Onemyle wants to show Tavola the top 5 creators they should consider.</p>
+
+<h4>Stage 1 — Filter (~50ms, free)</h4>
+<p>Takes ALL 2,000 creators in the system. Drops anyone obviously wrong: wrong category (a car reviewer), wrong content type (a podcaster), wrong location (San Francisco only, not remote), wrong budget (charges $5,000 minimum), inactive accounts. Drops ~95%. Now down to ~100 plausible candidates.</p>
+
+<h4>Stage 2 — Vector ranking (~200ms, free)</h4>
+<p>Tavola's gig description gets converted to a vector. Compared to the pre-computed vectors of the 100 candidates. Returns the top 20 by semantic similarity. This catches subtle fit — a creator who "specializes in fine dining and natural lighting" ranks higher than one who does "fast food and event coverage" even though both pass Stage 1's category filter.</p>
+
+<h4>Stage 3 — LLM agent (~3 sec total parallelized, ~$3.60)</h4>
+<p>For each of the top 20, send creator + business data to Claude with a prompt: <em>"Score this match. Cite specific signals. Recommend an action."</em> Claude returns structured output for each:</p>
+
+<pre><code>{
+  "creator_id": "creator_001 (Maya)",
+  "success_probability": 0.87,
+  "reasoning": "Boston location matches. Creator's $400-1200 range overlaps
+                Tavola's $500-1000. Creator has 23 completed gigs at 4.7 avg
+                rating, with niche tags 'fine_dining' and 'natural_lighting'
+                that align with Tavola's fine-dining positioning.",
+  "risk_factors": ["creator_typically_works_with_mid_tier", "first_collab"],
+  "recommended_action": "introduce"
+}</code></pre>
+
+<p>20 such predictions are generated in parallel.</p>
+
+<h4>Stage 4 — Quality gate (~50ms per check)</h4>
+<p>Each prediction passes through gates:</p>
+<ul>
+  <li>Schema valid? (Pydantic checks structure)</li>
+  <li>Confidence above 0.5?</li>
+  <li>Does reasoning cite real fields, not invented ones?</li>
+  <li>Does the recommended action match the probability? (e.g., not "introduce" with 30% probability)</li>
+  <li>Is reasoning specific enough?</li>
+</ul>
+
+<p>Predictions that fail get retried with a corrective prompt OR flagged "low confidence — escalate to human." Predictions that pass get sorted by <code>success_probability</code>. Top 5 returned to Tavola.</p>
+
+<h4>The result Tavola sees</h4>
+<p>A ranked list of 5 creators with reasoning attached. Maya is #1. Tavola reaches out to Maya. They have a great collaboration. Both rate the gig highly. Marketplace wins.</p>
+
+<h3>Behind the scenes (continuously)</h3>
+
+<p>While that prediction was happening, three things ran in the background:</p>
+
+<ol>
+  <li><strong>LangSmith</strong> captured a full trace of every step (Stage 1 filter logic, Stage 2 vector search, each Stage 3 LLM call, each Stage 4 gate decision). The platform team can debug "why did Maya rank above Carlos?" by clicking through the trace.</li>
+  <li><strong>LangFuse</strong> logged the cost ($3.60), latency (4.5 seconds), and success rate. Aggregated into dashboards the team checks daily.</li>
+  <li><strong>Local CSV log</strong> appended an audit row for compliance and historical analysis.</li>
+</ol>
+
+<h3>What happens when the platform team improves the system</h3>
+
+<p>The team wants to improve match quality. They tweak the agent's prompt to be more specific.</p>
+
+<p>They <code>git push</code> the change. <strong>GitHub Actions</strong> automatically:</p>
+
+<ol>
+  <li>Runs the agent against the 50-pair golden test set</li>
+  <li>Computes precision (87% → did it improve?), recall, faithfulness, cost-per-prediction</li>
+  <li>Compares to the previous version's scores</li>
+  <li><strong>If quality dropped → blocks the PR.</strong> The team must fix or revert.</li>
+  <li><strong>If quality improved → merge approved.</strong></li>
+</ol>
+
+<p>This is <strong>offline eval</strong> — it doesn't run on every prediction; it runs on every code change to make sure no one ships a worse version.</p>
+
+<p>Meanwhile, the <strong>runtime gate (Stage 4)</strong> keeps protecting users from individual bad predictions in production.</p>
+
+<h3>The roles each tool plays</h3>
+
+<table>
+  <thead><tr><th>Tool</th><th>Job</th></tr></thead>
+  <tbody>
+    <tr><td>Faker</td><td>Creates the synthetic creators/businesses (since Onemyle data isn't available yet)</td></tr>
+    <tr><td>sentence-transformers</td><td>Stage 2 — converts text to vectors for similarity comparison</td></tr>
+    <tr><td>LangGraph</td><td>Orchestrates Stage 3 as a multi-step state machine (load → analyze → predict → validate)</td></tr>
+    <tr><td>Claude (Anthropic)</td><td>The "brain" inside Stage 3 — does reasoning, generates explanations</td></tr>
+    <tr><td>Pydantic</td><td>Schema enforcement — Stage 4 first check</td></tr>
+    <tr><td>Custom Python (gate.py)</td><td>Stage 4 quality gates (confidence, consistency, etc.)</td></tr>
+    <tr><td>Ragas</td><td>Faithfulness scoring — used in offline eval AND lightweight runtime check</td></tr>
+    <tr><td>DeepEval</td><td>pytest-style tests run in CI to catch behavioral regressions</td></tr>
+    <tr><td>Promptfoo</td><td>A/B test prompt variants when the team is iterating on prompts</td></tr>
+    <tr><td>LangSmith</td><td>Tracing — every prediction's full lifecycle is recorded</td></tr>
+    <tr><td>LangFuse</td><td>Cost + latency dashboards</td></tr>
+    <tr><td>GitHub Actions</td><td>Runs offline eval on every code push</td></tr>
+  </tbody>
+</table>
+
+<h3>The full lifecycle in one mental picture</h3>
+
+<div class="ascii-diagram">
+NEW USER signs up or posts a gig
+        │
+        ▼
+PIPELINE runs (Stages 1 → 2 → 3 → 4)
+        │
+        ▼
+TOP 5 matches surfaced to user
+        │
+        │── Trace logged to LangSmith
+        │── Cost/latency to LangFuse
+        │── Audit to local CSV
+        │
+        ▼
+USER acts on recommendations
+        │
+        ▼
+OUTCOMES eventually known
+(successful gig / failed / no engagement)
+        │
+        ▼
+NEW LABELED DATA → eventually feeds back into golden set
+                   for the next round of evaluation
+
+
+MEANWHILE (offline / continuous):
+        │
+TEAM iterates on prompts / models / logic
+        │
+        ▼
+git push → CI runs offline eval against golden set
+        │
+        ▼
+PR blocked or merged based on quality scores
+        │
+        ▼
+Production updated (with confidence)
+</div>
+
+<h3>Why each stage matters</h3>
+
+<ul>
+  <li><strong>Stage 1</strong> — without it, you'd score 2,000 candidates per query. Too expensive, too slow.</li>
+  <li><strong>Stage 2</strong> — without it, you'd hand the LLM 100 random "category match" candidates. Wastes Stage 3 budget on bad candidates.</li>
+  <li><strong>Stage 3</strong> — without it, you'd just have keyword matching. No reasoning. No "why this match." No nuance.</li>
+  <li><strong>Stage 4</strong> — without it, low-confidence or hallucinated predictions reach users. Trust dies.</li>
+  <li><strong>Offline eval</strong> — without it, you'd ship prompt changes blindly. Quality silently degrades.</li>
+  <li><strong>Observability</strong> — without it, when something goes wrong, you can't figure out why.</li>
+</ul>
+
+<p>Each layer earns its place.</p>
+
+<h3>What success looks like at the end of 4 weeks</h3>
+
+<p>A working system where:</p>
+<ul>
+  <li>Tavola posts a gig → MatchScout returns 5 ranked creators in 5 seconds for ~$4</li>
+  <li>Each prediction has reasoning attached and has passed quality gates</li>
+  <li>Every prediction is traced and observable</li>
+  <li>Every code change runs through eval that blocks bad regressions</li>
+  <li>The PM artifacts (PRD, ICP, eval plan, GTM brief, risk register) document the strategic thinking</li>
+</ul>
+
+<p>Plus a public GitHub repo and a credible Onemyle-initiative entry on the resume.</p>
 
 <footer>
   MatchScout — Design Document v1.0 · 2026-05-09 · By Rajesh Ramani · Onemyle Investor & Pro Bono Product/AI Lead
