@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MatchScout — Project Workflow</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 30px 40px;
+    color: #222; line-height: 1.55; background: #fafbfc;
+  }
+  header { border-bottom: 3px solid #1a4d8f; padding-bottom: 14px; margin-bottom: 24px; }
+  h1 { margin: 0; color: #1a4d8f; font-size: 26pt; }
+  .subtitle { color: #666; font-size: 11pt; margin-top: 6px; }
+  h2 { color: #1a4d8f; margin-top: 30px; font-size: 17pt; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.06); font-size: 10.5pt; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f0f4fa; color: #1a4d8f; font-weight: 600; }
+
+  .phase {
+    background: white; border-left: 6px solid #1a4d8f;
+    padding: 18px 22px; margin: 18px 0; border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  }
+  .phase.done { border-left-color: #28a745; background: #f6fbf7; }
+  .phase.active { border-left-color: #f9a825; background: #fffbeb; }
+  .phase.future { border-left-color: #aaa; background: #f8f9fa; opacity: 0.85; }
+
+  .phase-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .phase-title { font-size: 14pt; font-weight: 700; color: #1a4d8f; }
+  .phase-status {
+    font-size: 9pt; padding: 2px 10px; border-radius: 12px;
+    text-transform: uppercase; font-weight: 600;
+  }
+  .status-done { background: #d4edda; color: #155724; }
+  .status-active { background: #fff3cd; color: #856404; }
+  .status-future { background: #e2e3e5; color: #555; }
+
+  .phase-meta { color: #888; font-size: 10pt; margin-bottom: 10px; }
+
+  .step-list { padding-left: 0; list-style: none; counter-reset: step-counter; }
+  .step-list > li {
+    counter-increment: step-counter; position: relative;
+    padding: 6px 0 6px 32px; margin: 4px 0;
+  }
+  .step-list > li::before {
+    content: counter(step-counter);
+    position: absolute; left: 0; top: 6px;
+    width: 22px; height: 22px;
+    background: #1a4d8f; color: white;
+    border-radius: 50%; text-align: center;
+    font-size: 10pt; font-weight: 600;
+    line-height: 22px;
+  }
+
+  .deliverables {
+    background: #f0f4fa; padding: 8px 14px; border-radius: 4px;
+    margin: 8px 0; font-size: 10pt;
+  }
+
+  .timeline-overview {
+    background: linear-gradient(90deg, #28a745 0%, #28a745 30%, #f9a825 30%, #f9a825 38%, #ddd 38%, #ddd 100%);
+    height: 30px; border-radius: 4px; margin: 18px 0; position: relative;
+  }
+  .timeline-overview::after {
+    content: 'Phase 0-1 complete · Phase 2 active · Phases 3-8 pending';
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: 7px; color: #222; font-size: 10pt; font-weight: 600;
+  }
+
+  .arrow { font-size: 14pt; color: #1a4d8f; margin: 8px 0; text-align: center; }
+  footer { margin-top: 50px; padding-top: 16px; border-top: 1px solid #ddd; color: #888; font-size: 9pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MatchScout — Project Workflow</h1>
+  <div class="subtitle">
+    The whole journey, end to end · Phase by phase from setup to deployment · Big picture, no implementation details
+  </div>
+</header>
+
+<h2>Where we are right now</h2>
+<div class="timeline-overview"></div>
+
+<table>
+  <thead><tr><th>Phase</th><th>Status</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td>Phase 0 — Setup</td><td>✅ Done</td><td>1 hour</td></tr>
+    <tr><td>Phase 1 — Synthetic data</td><td>✅ Done</td><td>1 day</td></tr>
+    <tr><td>Phase 2 — Build the cascade</td><td>🟡 Starting next</td><td>3-4 days</td></tr>
+    <tr><td>Phase 3 — Eval framework</td><td>⏳ Pending</td><td>3-4 days</td></tr>
+    <tr><td>Phase 4 — Observability</td><td>⏳ Pending</td><td>1-2 days</td></tr>
+    <tr><td>Phase 5 — PM artifacts</td><td>⏳ Pending</td><td>2 days</td></tr>
+    <tr><td>Phase 6 — Polish + documentation</td><td>⏳ Pending</td><td>1 day</td></tr>
+    <tr><td>Phase 7 — Onemyle review</td><td>⏳ Pending</td><td>~1 week</td></tr>
+    <tr><td>Phase 8 — V2 productionization</td><td>🔮 Future (out of scope for PoC)</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<div class="phase done">
+  <div class="phase-header">
+    <span class="phase-title">Phase 0 — Project Setup</span>
+    <span class="phase-status status-done">Done</span>
+  </div>
+  <div class="phase-meta">~1 hour · Goal: working dev environment</div>
+
+  <p><strong>What it is:</strong> Stand up the project skeleton. Install dependencies. Configure API keys.</p>
+
+  <ol class="step-list">
+    <li>Create folder structure (matchscout/, data/, prompts/, eval/, pm/)</li>
+    <li>Write requirements.txt with all libraries (LangGraph, Anthropic, Faker, sentence-transformers, Ragas, DeepEval, LangSmith, LangFuse)</li>
+    <li>pip install everything</li>
+    <li>Create .env with API keys (Anthropic, LangSmith, LangFuse)</li>
+    <li>Smoke test — verify imports work</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Project folder ready to develop in. All dependencies installed.</div>
+</div>
+
+<!-- ====================================================================== -->
+<div class="phase done">
+  <div class="phase-header">
+    <span class="phase-title">Phase 1 — Synthetic Marketplace Data</span>
+    <span class="phase-status status-done">Done</span>
+  </div>
+  <div class="phase-meta">~1 day · Goal: realistic test dataset</div>
+
+  <p><strong>What it is:</strong> Generate a synthetic Onemyle marketplace — fake creators, fake businesses, fake historical matches. Since real Onemyle data isn't available, this lets us build and test the system.</p>
+
+  <ol class="step-list">
+    <li>Define the 8-category schema (Food, Auto, Retail, Beauty, Fashion, Fitness, Travel, Home/Real Estate) with sub-categories, content types, and adjacency map → <code>data/categories.json</code></li>
+    <li>Build the generator — Faker-based Python script that creates realistic creator and business profiles</li>
+    <li>Generate 400 creators with portfolios, locations, budgets, follower counts</li>
+    <li>Generate 300 businesses with content needs, sizes, locations, budgets</li>
+    <li>Generate 150 historical matches with outcomes (success/failed/no_response) where outcome severity correlates with structural compatibility</li>
+    <li>Save all to CSV files in <code>data/</code></li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> data/creators.csv, data/businesses.csv, data/matches.csv — the marketplace catalog + history</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-title">Phase 2 — Build the Cascade Pipeline</span>
+    <span class="phase-status status-active">Active</span>
+  </div>
+  <div class="phase-meta">~3-4 days · Goal: working prediction pipeline end-to-end</div>
+
+  <p><strong>What it is:</strong> Build the 4-stage cascade architecture that takes a creator + business pair and predicts match success.</p>
+
+  <p><strong>Important — what data the pipeline uses:</strong></p>
+  <ul style="background:#f0f4fa;padding:10px 18px;border-radius:4px;font-size:10pt;">
+    <li>The pipeline reads the EXISTING <code>creators.csv</code> + <code>businesses.csv</code> from Phase 1 (no new data generated)</li>
+    <li>It predicts on NEW pairings — the 119,850 creator-business combinations that AREN'T in <code>matches.csv</code></li>
+    <li><code>matches.csv</code> is used for two things: (a) historical context the agent can cite ("this creator has 23 past gigs at 4.7 rating"), (b) the eval set later (Phase 3) to measure agent accuracy</li>
+  </ul>
+
+  <ol class="step-list">
+    <li><strong>Stage 1 — Filter</strong> (rules): drop pairs that fail basic checks (wrong category, wrong location, no budget overlap)</li>
+    <li><strong>Stage 2 — Vector ranker</strong>: use sentence-transformers (small, free, local) to embed profiles and rank candidates by semantic similarity. We use the small model because Stage 3 LLM does the deep reasoning — Stage 2 just narrows candidates.</li>
+    <li><strong>Stage 3 — LLM agent</strong>: LangGraph state machine + Claude reasons about top candidates and outputs structured prediction (probability, reasoning, risk flags, recommended action)</li>
+    <li><strong>Stage 4 — Quality gate</strong>: per-prediction RUNTIME check (different from offline eval in Phase 3) — validates schema, confidence threshold, faithfulness, no hallucinated fields, self-consistency. Failed predictions get retried with a corrective prompt OR rejected.</li>
+    <li><strong>Pipeline orchestrator</strong>: runs Stage 1 → 2 → 3 → 4 end-to-end</li>
+    <li>Smoke-test on a few creator-business pairs; verify output shape</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Run <code>python -m matchscout.pipeline --business biz_001</code> and get top 5 ranked creator predictions with reasoning</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 3 — Eval Framework</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~3-4 days · Goal: measurable quality, locked thresholds, CI gating</div>
+
+  <p><strong>What it is:</strong> Without measurement, the AI is "vibes." Build a multi-layer eval system that quantifies quality and prevents regressions.</p>
+
+  <ol class="step-list">
+    <li><strong>Build golden test set</strong>: hand-label 50 creator-business pairs with expected outcomes (success/fail) and expected reasoning themes → <code>eval/golden_set.json</code></li>
+    <li><strong>Wire up Ragas</strong>: measures faithfulness — did the agent's reasoning cite signals actually present in the input?</li>
+    <li><strong>Wire up DeepEval</strong>: pytest-style assertions — output schema valid, no invented fields, self-consistent action</li>
+    <li><strong>Wire up Promptfoo</strong>: A/B test 3 prompt variants on golden set, pick the best</li>
+    <li><strong>Build regression suite</strong>: full eval runner with thresholds (precision ≥ 75%, faithfulness ≥ 0.85, cost ≤ $0.30)</li>
+    <li><strong>Wire up CI</strong>: GitHub Actions runs eval on every push; blocks PR if quality drops</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Full eval framework. Numbers like "precision 87%, faithfulness 0.84, $0.18 per prediction" we can put in PRD and resume.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 4 — Observability Wiring</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~1-2 days · Goal: traceable, debuggable, cost-monitored predictions</div>
+
+  <p><strong>What it is:</strong> Without observability, when something goes wrong you can't debug it. Wire up tracing and cost monitoring.</p>
+
+  <ol class="step-list">
+    <li><strong>LangSmith integration</strong>: every LLM call traced — inputs, outputs, latency, token counts</li>
+    <li><strong>LangFuse integration</strong>: aggregated dashboards — cost per prediction, daily spend, p95 latency</li>
+    <li><strong>Local audit log</strong>: append-only CSV of every prediction with cost + outcome</li>
+    <li><strong>Per-prediction cost tracking</strong>: dollar cost computed and logged for each call</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Live dashboards. Click any prediction → see full trace. Watch cost trends in real time.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 5 — PM Artifacts</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~2 days · Goal: a credible product spec with measured numbers</div>
+
+  <p><strong>What it is:</strong> Translate the technical work into product-management deliverables. These are what differentiate "engineering portfolio" from "AI PM portfolio."</p>
+
+  <ol class="step-list">
+    <li><strong>1-page PRD</strong>: problem, hypothesis, ICP, success metrics (with REAL numbers from Phase 3), MVP scope, kill criteria</li>
+    <li><strong>ICP definition</strong>: target creator types + target business types; anti-ICP for both sides</li>
+    <li><strong>Eval plan</strong>: thresholds, monitoring strategy, regression criteria, production deployment gates</li>
+    <li><strong>GTM brief</strong>: positioning, pricing model implications, rollout sequencing</li>
+    <li><strong>Risk register</strong>: top 5 AI-specific risks with mitigations (hallucination, cost runaway, fairness)</li>
+    <li><strong>Initiative summary</strong>: formal Onemyle PoC documentation</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Complete PM artifact set in <code>pm/</code>. Interview-ready strategic narrative.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 6 — Polish + Public Documentation</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~1 day · Goal: portfolio-ready GitHub repo</div>
+
+  <p><strong>What it is:</strong> Make the work easy for others (recruiters, hiring managers, future Onemyle stakeholders) to understand quickly.</p>
+
+  <ol class="step-list">
+    <li>Polished README with architecture diagram, "what does it do," "how to run it"</li>
+    <li>Example outputs / screenshots</li>
+    <li>Clear "Status: Proof of Concept" framing</li>
+    <li>Honest "What's NOT in V1" section</li>
+    <li>Optional: LinkedIn post draft about the work</li>
+    <li>Optional: Medium / blog post on technical decisions</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Public GitHub repo a recruiter can click into and understand in 5 minutes</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 7 — Onemyle Review</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~1 week · Goal: formal acknowledgment of the initiative</div>
+
+  <p><strong>What it is:</strong> Present the PoC to Onemyle leadership. Get explicit acknowledgment that this is a real Onemyle initiative (which strengthens the resume claim).</p>
+
+  <ol class="step-list">
+    <li>Demo the working pipeline to Onemyle founders / leadership</li>
+    <li>Walk through PRD, ICP, GTM brief</li>
+    <li>Discuss productionization tradeoffs (cost, infra, integration effort)</li>
+    <li>Get a decision: "Yes, let's build V2" OR "Interesting, not now" OR "Pivot direction"</li>
+    <li>Document the outcome — even if "not now," it strengthens the credibility of the work</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Formal acknowledgment of MatchScout as an Onemyle initiative. Decision on next steps. Possible LinkedIn announcement.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 8 — V2 Productionization (only if Onemyle says go)</span>
+    <span class="phase-status status-future">Future (out of PoC scope)</span>
+  </div>
+  <div class="phase-meta">~6-8 weeks · Goal: real production deployment at Onemyle</div>
+
+  <p><strong>What it is:</strong> Take the PoC and ship it as a real platform feature. Most of this maps to P10 in your curriculum (FastAPI, Pinecone, multi-cloud, reliability).</p>
+
+  <ol class="step-list">
+    <li>Migrate from CSV to real database (PostgreSQL for entities, Pinecone for embeddings)</li>
+    <li>Wrap the pipeline as a FastAPI service</li>
+    <li>Integrate with real Onemyle data feeds</li>
+    <li>Add reliability patterns (retry, circuit breaker, fallback to cheaper model)</li>
+    <li>Multi-cloud LLM routing (Bedrock primary, OpenAI fallback)</li>
+    <li>Set up production monitoring + alerting</li>
+    <li>Closed alpha rollout to 5-10 marketplace participants</li>
+    <li>Measure real-world impact (match quality, retention, GMV)</li>
+    <li>Iterate based on alpha feedback</li>
+    <li>Public beta → general availability</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Production AI feature live in the Onemyle marketplace. Real users. Real impact.</div>
+</div>
+
+<h2>Two kinds of eval — Stage 4 vs Phase 3</h2>
+
+<p>This is the most-confused part of the system. Both Stage 4 (in Phase 2) and Phase 3 do "eval" but at different scales:</p>
+
+<table>
+  <thead><tr><th></th><th>Stage 4 (Quality Gate)</th><th>Phase 3 (Eval Framework)</th></tr></thead>
+  <tbody>
+    <tr><td>Runs</td><td>Every prediction at request time</td><td>Every code push (CI) + during dev</td></tr>
+    <tr><td>Against</td><td>THIS specific prediction</td><td>The 50-pair golden set (fixed)</td></tr>
+    <tr><td>Decides</td><td>Surface this prediction OR retry OR reject</td><td>Is this version good enough to ship</td></tr>
+    <tr><td>Failure response</td><td>Block one bad prediction from reaching user</td><td>Block a bad code change from being merged</td></tr>
+    <tr><td>Speed required</td><td>Fast (~50ms per check)</td><td>Can be slow (runs whole golden set)</td></tr>
+    <tr><td>Tools</td><td>Pydantic, custom Python checks, lightweight Ragas</td><td>Ragas (heavy), DeepEval, Promptfoo, regression suite</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Analogy:</strong> Stage 4 = airport security (per-passenger). Phase 3 = airline maintenance audit (per-fleet). You need both.</p>
+
+<h2>What eval actually measures (broader than prompts)</h2>
+
+<p>A common misconception: "eval is for prompt engineering." Wrong. Eval is the measurement layer that informs ALL engineering decisions:</p>
+
+<table>
+  <thead><tr><th>Decision</th><th>Eval tells you...</th></tr></thead>
+  <tbody>
+    <tr><td>Should I tweak the prompt?</td><td>Did the new variant beat the old one?</td></tr>
+    <tr><td>Should I switch models? (Sonnet → Opus)</td><td>Is the quality gain worth 5x cost?</td></tr>
+    <tr><td>Should I change architecture? (single LLM → cascade)</td><td>Did adding stages hurt or help?</td></tr>
+    <tr><td>Should I tighten the gate?</td><td>Are we rejecting too many good predictions?</td></tr>
+    <tr><td>Should I add more context to the prompt?</td><td>Does richer input improve faithfulness?</td></tr>
+    <tr><td>Should I switch sentence-transformer model?</td><td>Does Stage 2 miss good candidates?</td></tr>
+  </tbody>
+</table>
+
+<p>Without eval, every change is a guess. Promptfoo (one tool in the eval framework) IS specifically about prompt iteration — but the broader eval framework is about quality regardless of what changed.</p>
+
+<h2>The bird's-eye view</h2>
+
+<table>
+  <thead><tr><th>Phase</th><th>Question it answers</th></tr></thead>
+  <tbody>
+    <tr><td>0 — Setup</td><td>"Can I write Python code in this project?"</td></tr>
+    <tr><td>1 — Synthetic data</td><td>"What does the marketplace look like?"</td></tr>
+    <tr><td>2 — Cascade pipeline</td><td>"How does AI score a match?"</td></tr>
+    <tr><td>3 — Eval framework</td><td>"Is the AI any good?"</td></tr>
+    <tr><td>4 — Observability</td><td>"Why did the AI say that?"</td></tr>
+    <tr><td>5 — PM artifacts</td><td>"What's the strategic case for this product?"</td></tr>
+    <tr><td>6 — Polish</td><td>"Can a stranger understand what I built?"</td></tr>
+    <tr><td>7 — Onemyle review</td><td>"Is this a real initiative or a hobby project?"</td></tr>
+    <tr><td>8 — V2 prod</td><td>"Should we ship it for real?"</td></tr>
+  </tbody>
+</table>
+
+<h2>What you can say in interviews after each phase</h2>
+
+<table>
+  <thead><tr><th>After phase</th><th>Interview-ready claim</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>"I built a synthetic marketplace dataset to test marketplace AI patterns"</td></tr>
+    <tr><td>2</td><td>"I designed and built a 3-stage cascade architecture for marketplace match prediction"</td></tr>
+    <tr><td>3</td><td>"I achieved X% precision and Y faithfulness with a regression suite blocking bad PRs"</td></tr>
+    <tr><td>4</td><td>"Every prediction is fully traced and cost-tracked in production-style observability"</td></tr>
+    <tr><td>5</td><td>"I authored the full PM artifact set — PRD, ICP, eval plan, GTM brief, risk register"</td></tr>
+    <tr><td>6</td><td>"You can review the full repo at github.com/..."</td></tr>
+    <tr><td>7</td><td>"This is a formal initiative at Onemyle, where I serve as Investor & Pro Bono Product/AI Lead"</td></tr>
+    <tr><td>8</td><td>"It's now live in production at Onemyle"</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  MatchScout — Project Workflow · 2026-05-09 · By Rajesh Ramani
+</footer>
+
+</body>
+</html>

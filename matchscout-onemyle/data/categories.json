@@ -1,0 +1,350 @@
+{
+    "primary_categories": {
+        "food_beverage": {
+            "subcategories": [
+                "fine_dining",
+                "casual_dining",
+                "cafes",
+                "bakeries",
+                "bars",
+                "food_trucks",
+                "specialty_foods",
+                "catering"
+            ],
+            "business_types": [
+                "restaurant",
+                "cafe",
+                "bakery",
+                "bar",
+                "food_truck",
+                "catering_service"
+            ],
+            "creator_types": [
+                "food_photographer",
+                "food_vlogger",
+                "recipe_creator",
+                "restaurant_reviewer",
+                "dining_blogger"
+            ],
+            "niche_tags": [
+                "italian",
+                "asian",
+                "mexican",
+                "vegan",
+                "farm_to_table",
+                "fine_dining",
+                "natural_lighting",
+                "magazine_quality",
+                "casual",
+                "brunch",
+                "dessert",
+                "wine_pairing"
+            ]
+        },
+        "auto": {
+            "subcategories": [
+                "luxury",
+                "ev",
+                "used",
+                "service",
+                "parts",
+                "detailing",
+                "motorcycle"
+            ],
+            "business_types": [
+                "auto_dealer",
+                "repair_shop",
+                "parts_store",
+                "detailer",
+                "body_shop"
+            ],
+            "creator_types": [
+                "vehicle_reviewer",
+                "auto_enthusiast",
+                "ev_blogger",
+                "automotive_videographer"
+            ],
+            "niche_tags": [
+                "luxury",
+                "electric_vehicle",
+                "performance",
+                "off_road",
+                "vintage",
+                "sedan",
+                "truck",
+                "suv",
+                "motorcycle",
+                "test_drive"
+            ]
+        },
+        "retail": {
+            "subcategories": [
+                "apparel",
+                "electronics",
+                "home_goods",
+                "specialty",
+                "big_box",
+                "boutique"
+            ],
+            "business_types": [
+                "clothing_store",
+                "electronics_store",
+                "boutique",
+                "big_box_retailer",
+                "specialty_shop"
+            ],
+            "creator_types": [
+                "haul_creator",
+                "shopping_blogger",
+                "lifestyle_influencer",
+                "product_reviewer"
+            ],
+            "niche_tags": [
+                "streetwear",
+                "vintage",
+                "tech_gadgets",
+                "home_decor",
+                "boutique_finds",
+                "deals",
+                "minimalist",
+                "luxury",
+                "kids",
+                "outdoor"
+            ]
+        },
+        "beauty_wellness": {
+            "subcategories": [
+                "hair_salon",
+                "skincare",
+                "makeup",
+                "spa",
+                "fragrance",
+                "supplements",
+                "nail_salon"
+            ],
+            "business_types": [
+                "salon",
+                "spa",
+                "dermatology_clinic",
+                "beauty_brand",
+                "wellness_center"
+            ],
+            "creator_types": [
+                "beauty_blogger",
+                "makeup_artist",
+                "skincare_reviewer",
+                "wellness_influencer"
+            ],
+            "niche_tags": [
+                "clean_beauty",
+                "skincare",
+                "makeup_tutorial",
+                "wellness",
+                "anti_aging",
+                "natural",
+                "luxury",
+                "drugstore",
+                "spa_day",
+                "self_care"
+            ]
+        },
+        "fashion": {
+            "subcategories": [
+                "high_end",
+                "streetwear",
+                "athleisure",
+                "sustainable",
+                "vintage",
+                "accessories",
+                "footwear"
+            ],
+            "business_types": [
+                "clothing_brand",
+                "designer",
+                "boutique",
+                "shoe_store",
+                "accessory_shop"
+            ],
+            "creator_types": [
+                "fashion_blogger",
+                "stylist",
+                "lookbook_creator",
+                "ootd_influencer"
+            ],
+            "niche_tags": [
+                "streetwear",
+                "luxury",
+                "minimalist",
+                "vintage",
+                "ethical",
+                "lookbook",
+                "ootd",
+                "color_palette",
+                "seasonal",
+                "designer"
+            ]
+        },
+        "fitness_sports": {
+            "subcategories": [
+                "gym",
+                "yoga",
+                "crossfit",
+                "personal_training",
+                "sports_retail",
+                "outdoor"
+            ],
+            "business_types": [
+                "gym",
+                "yoga_studio",
+                "sports_retailer",
+                "personal_trainer",
+                "supplement_shop"
+            ],
+            "creator_types": [
+                "fitness_influencer",
+                "trainer",
+                "gear_reviewer",
+                "workout_creator"
+            ],
+            "niche_tags": [
+                "strength",
+                "cardio",
+                "yoga",
+                "pilates",
+                "outdoor",
+                "running",
+                "cycling",
+                "nutrition",
+                "recovery",
+                "gear_review"
+            ]
+        },
+        "travel_hospitality": {
+            "subcategories": [
+                "boutique_hotel",
+                "luxury_resort",
+                "bnb",
+                "tour_operator",
+                "attraction"
+            ],
+            "business_types": [
+                "hotel",
+                "bnb",
+                "tour_operator",
+                "travel_agency",
+                "attraction"
+            ],
+            "creator_types": [
+                "travel_blogger",
+                "hotel_reviewer",
+                "destination_photographer",
+                "vacation_vlogger"
+            ],
+            "niche_tags": [
+                "luxury_travel",
+                "budget_travel",
+                "adventure",
+                "family",
+                "couples",
+                "solo",
+                "international",
+                "domestic",
+                "boutique",
+                "all_inclusive"
+            ]
+        },
+        "home_real_estate": {
+            "subcategories": [
+                "furniture",
+                "home_improvement",
+                "real_estate_agency",
+                "interior_design",
+                "garden",
+                "property_management"
+            ],
+            "business_types": [
+                "furniture_store",
+                "home_improvement",
+                "real_estate_agency",
+                "interior_designer",
+                "landscaper"
+            ],
+            "creator_types": [
+                "home_decor_blogger",
+                "diy_creator",
+                "real_estate_vlogger",
+                "design_influencer"
+            ],
+            "niche_tags": [
+                "modern",
+                "traditional",
+                "diy",
+                "renovation",
+                "small_space",
+                "luxury",
+                "garden",
+                "first_time_buyer",
+                "investment",
+                "minimalist"
+            ]
+        }
+    },
+    "content_types": [
+        "reels",
+        "long_form_video",
+        "photography",
+        "blog_posts",
+        "podcast",
+        "social_posts",
+        "live_coverage"
+    ],
+    "adjacent_categories": {
+        "food_beverage": [
+            "travel_hospitality",
+            "retail"
+        ],
+        "auto": [],
+        "retail": [
+            "fashion",
+            "beauty_wellness",
+            "home_real_estate"
+        ],
+        "beauty_wellness": [
+            "fashion",
+            "fitness_sports"
+        ],
+        "fashion": [
+            "beauty_wellness",
+            "retail"
+        ],
+        "fitness_sports": [
+            "beauty_wellness"
+        ],
+        "travel_hospitality": [
+            "food_beverage"
+        ],
+        "home_real_estate": [
+            "retail"
+        ]
+    },
+    "locations": [
+        "Boston, MA",
+        "New York, NY",
+        "Brooklyn, NY",
+        "Los Angeles, CA",
+        "San Francisco, CA",
+        "San Diego, CA",
+        "Chicago, IL",
+        "Austin, TX",
+        "Houston, TX",
+        "Dallas, TX",
+        "Miami, FL",
+        "Atlanta, GA",
+        "Seattle, WA",
+        "Portland, OR",
+        "Denver, CO",
+        "Phoenix, AZ",
+        "Philadelphia, PA",
+        "Nashville, TN"
+    ]
+}

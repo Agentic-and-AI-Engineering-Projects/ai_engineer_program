@@ -268,6 +268,11 @@
 
 <h3>ranker.py — Stage 2 (Vector Similarity)</h3>
 
+<div class="info">
+  <div class="info-title">Why we use the small sentence-transformer model</div>
+  Stage 2 uses <code>all-MiniLM-L6-v2</code> (22M params, 384-dim, ~80MB, free, local) — not the larger <code>all-mpnet-base-v2</code> (110M params, 768-dim). For Stage 2's job (narrowing 5K candidates to 20), the small model is fast enough and good enough. Stage 3's LLM does the deep reasoning afterwards. If we were using vector similarity as the FINAL ranker (no LLM stage after), we'd upgrade. Eval (Phase 3) will confirm whether MiniLM is missing candidates the LLM would have ranked highly — if yes, we'd swap to mpnet.
+</div>
+
 <pre><code>from sentence_transformers import SentenceTransformer
 
 model = SentenceTransformer("all-MiniLM-L6-v2")  # local, free, fast
@@ -641,6 +646,20 @@ python -m eval.run_golden_set    # runs cascade against all golden set entries</
 <div class="part">12. Eval Framework</div>
 
 <h2 id="eval">Multi-Layer Eval</h2>
+
+<div class="info">
+  <div class="info-title">Two distinct eval scopes — don't confuse them</div>
+  <strong>Stage 4 (Runtime Quality Gate)</strong> — runs on EVERY prediction. Decides if THIS specific output is trustworthy enough to surface. Fast checks (~50ms). Uses Pydantic + custom Python + lightweight Ragas.
+  <br><br>
+  <strong>Phase 3 (Offline Eval Framework, this section)</strong> — runs on every code push (CI). Measures aggregate quality across the golden set. Decides if the codebase as a whole is good enough to ship. Slower, more thorough. Uses Ragas (heavy), DeepEval, Promptfoo, regression suite.
+  <br><br>
+  Together: Stage 4 protects users from individual bad predictions; offline eval protects the codebase from systemic regressions. Both required.
+</div>
+
+<div class="info">
+  <div class="info-title">Eval is broader than prompt engineering</div>
+  Common misconception: "eval = prompt iteration." Wrong. Eval is the measurement layer that informs ALL engineering decisions — model selection (Sonnet vs Opus), architecture changes (cascade vs single LLM), gate strictness, vector model choice, candidate count, etc. Promptfoo is the prompt-A/B-testing slice; the rest of the framework measures quality regardless of what changed.
+</div>
 
 <h3>Golden set</h3>
 
