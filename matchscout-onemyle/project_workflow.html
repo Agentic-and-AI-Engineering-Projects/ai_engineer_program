@@ -67,7 +67,7 @@
     height: 30px; border-radius: 4px; margin: 18px 0; position: relative;
   }
   .timeline-overview::after {
-    content: 'Phase 0-1 complete · Phase 2 active · Phases 3-8 pending';
+    content: 'Phase 0-1 complete · Phase 2 active · Phases 3-9 pending';
     position: absolute; left: 50%; transform: translateX(-50%);
     top: 7px; color: #222; font-size: 10pt; font-weight: 600;
   }
@@ -93,15 +93,20 @@
   <tbody>
     <tr><td>Phase 0 — Setup</td><td>✅ Done</td><td>1 hour</td></tr>
     <tr><td>Phase 1 — Synthetic data</td><td>✅ Done</td><td>1 day</td></tr>
-    <tr><td>Phase 2 — Build the cascade</td><td>🟡 Starting next</td><td>3-4 days</td></tr>
-    <tr><td>Phase 3 — Eval framework</td><td>⏳ Pending</td><td>3-4 days</td></tr>
-    <tr><td>Phase 4 — Observability</td><td>⏳ Pending</td><td>1-2 days</td></tr>
-    <tr><td>Phase 5 — PM artifacts</td><td>⏳ Pending</td><td>2 days</td></tr>
-    <tr><td>Phase 6 — Polish + documentation</td><td>⏳ Pending</td><td>1 day</td></tr>
-    <tr><td>Phase 7 — Onemyle review</td><td>⏳ Pending</td><td>~1 week</td></tr>
-    <tr><td>Phase 8 — V2 productionization</td><td>🔮 Future (out of scope for PoC)</td><td>—</td></tr>
+    <tr><td>Phase 2 — Build the 3-stage cascade (real-time)</td><td>🟡 Starting next</td><td>3-4 days</td></tr>
+    <tr><td>Phase 3 — Pre-deploy eval framework (CI gating)</td><td>⏳ Pending</td><td>3 days</td></tr>
+    <tr><td><strong>Phase 4 — Production audit batch (NEW)</strong></td><td>⏳ Pending</td><td>1-2 days</td></tr>
+    <tr><td>Phase 5 — Observability wiring (LangSmith + LangFuse)</td><td>⏳ Pending</td><td>1-2 days</td></tr>
+    <tr><td>Phase 6 — PM artifacts</td><td>⏳ Pending</td><td>2 days</td></tr>
+    <tr><td>Phase 7 — Polish + documentation</td><td>⏳ Pending</td><td>1 day</td></tr>
+    <tr><td>Phase 8 — Onemyle review</td><td>⏳ Pending</td><td>~1 week</td></tr>
+    <tr><td>Phase 9 — V2 productionization</td><td>🔮 Future (out of scope for PoC)</td><td>—</td></tr>
   </tbody>
 </table>
+
+<div style="background:#fff3cd; border-left:4px solid #f9a825; padding:12px 18px; margin:16px 0; border-radius:4px; font-size:10pt;">
+  <strong>Architecture revised 2026-05-10:</strong> Stage 4 runtime quality gate moved to OFFLINE batch (new Phase 4). Real-time pipeline is now 3 stages with only Pydantic schema validation inline. Heavier checks (faithfulness, forbidden terms, consistency) run as a nightly audit on production logs, with results in a dashboard for human remediation. Standard pattern for marketplace AI.
+</div>
 
 <!-- ====================================================================== -->
 <div class="phase done">
@@ -151,12 +156,12 @@
 <!-- ====================================================================== -->
 <div class="phase active">
   <div class="phase-header">
-    <span class="phase-title">Phase 2 — Build the Cascade Pipeline</span>
+    <span class="phase-title">Phase 2 — Build the 3-Stage Real-Time Cascade</span>
     <span class="phase-status status-active">Active</span>
   </div>
-  <div class="phase-meta">~3-4 days · Goal: working prediction pipeline end-to-end</div>
+  <div class="phase-meta">~3-4 days · Goal: working real-time prediction pipeline end-to-end</div>
 
-  <p><strong>What it is:</strong> Build the 4-stage cascade architecture that takes a creator + business pair and predicts match success.</p>
+  <p><strong>What it is:</strong> Build the 3-stage cascade architecture that takes a creator + business pair and predicts match success in real time. (Heavier quality checks are now in the offline Phase 4 batch — see below.)</p>
 
   <p><strong>Important — what data the pipeline uses:</strong></p>
   <ul style="background:#f0f4fa;padding:10px 18px;border-radius:4px;font-size:10pt;">
@@ -167,14 +172,13 @@
 
   <ol class="step-list">
     <li><strong>Stage 1 — Filter</strong> (rules): drop pairs that fail basic checks (wrong category, wrong location, no budget overlap)</li>
-    <li><strong>Stage 2 — Vector ranker</strong>: use sentence-transformers (small, free, local) to embed profiles and rank candidates by semantic similarity. We use the small model because Stage 3 LLM does the deep reasoning — Stage 2 just narrows candidates.</li>
-    <li><strong>Stage 3 — LLM agent</strong>: LangGraph state machine + Claude reasons about top candidates and outputs structured prediction (probability, reasoning, risk flags, recommended action)</li>
-    <li><strong>Stage 4 — Quality gate</strong>: per-prediction RUNTIME check (different from offline eval in Phase 3) — validates schema, confidence threshold, faithfulness, no hallucinated fields, self-consistency. Failed predictions get retried with a corrective prompt OR rejected.</li>
-    <li><strong>Pipeline orchestrator</strong>: runs Stage 1 → 2 → 3 → 4 end-to-end</li>
+    <li><strong>Stage 2 — Vector ranker</strong>: use sentence-transformers (small, free, local) to embed profiles and rank candidates by semantic similarity</li>
+    <li><strong>Stage 3 — LLM agent</strong>: LangGraph state machine + Claude reasons about top candidates and outputs structured prediction (probability, reasoning, risk flags, recommended action). Pydantic schema validation runs INLINE here (~1ms, prevents broken JSON). All other quality checks moved to Phase 4 batch.</li>
+    <li><strong>Pipeline orchestrator</strong>: runs Stage 1 → 2 → 3 end-to-end</li>
     <li>Smoke-test on a few creator-business pairs; verify output shape</li>
   </ol>
 
-  <div class="deliverables">📦 <strong>Deliverable:</strong> Run <code>python -m matchscout.pipeline --business biz_001</code> and get top 5 ranked creator predictions with reasoning</div>
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Run <code>python -m matchscout.pipeline --business biz_001</code> and get top 5 ranked creator predictions with reasoning, in ~4 seconds for ~$3.60</div>
 </div>
 
 <div class="arrow">▼</div>
@@ -206,17 +210,44 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 4 — Observability Wiring</span>
+    <span class="phase-title">Phase 4 — Production Audit Batch (NEW)</span>
+    <span class="phase-status status-future">Pending</span>
+  </div>
+  <div class="phase-meta">~1-2 days · Goal: heavier quality checks on production logs (offline)</div>
+
+  <p><strong>What it is:</strong> Replaces the original "Stage 4 inline gate." Runs nightly (or hourly) on production prediction logs. Catches quality issues that the inline pipeline doesn't have time to check.</p>
+
+  <p><strong>Why offline batch instead of inline gate:</strong> Faster real-time response, lower per-prediction cost, simpler real-time pipeline. Trade-off: some bad predictions reach users until the next batch flags them. Mitigated by dashboard alerts and remediation workflow. Standard pattern at Airbnb / DoorDash / Uber.</p>
+
+  <ol class="step-list">
+    <li><strong>Read production prediction logs</strong> from last N hours (predictions.csv + LangSmith traces)</li>
+    <li><strong>Run Ragas faithfulness</strong> on each prediction — was reasoning grounded in input?</li>
+    <li><strong>Forbidden term check</strong> — did the agent reference data fields we don't track?</li>
+    <li><strong>Self-consistency check</strong> — does recommended_action align with success_probability?</li>
+    <li><strong>Confidence threshold violations</strong> — flag low-confidence predictions for review</li>
+    <li><strong>Aggregate to dashboard</strong> — daily summary of flagged predictions with drill-down</li>
+    <li><strong>Alerting</strong> — email/Slack if &gt; 5% of predictions failed audit in a day</li>
+    <li><strong>Remediation workflow</strong> — flagged predictions surface for marketplace ops review</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Nightly audit job + dashboard showing audit results + alerting on threshold breaches</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<div class="phase future">
+  <div class="phase-header">
+    <span class="phase-title">Phase 5 — Observability Wiring</span>
     <span class="phase-status status-future">Pending</span>
   </div>
   <div class="phase-meta">~1-2 days · Goal: traceable, debuggable, cost-monitored predictions</div>
 
-  <p><strong>What it is:</strong> Without observability, when something goes wrong you can't debug it. Wire up tracing and cost monitoring.</p>
+  <p><strong>What it is:</strong> Without observability, when something goes wrong you can't debug it. Wire up tracing and cost monitoring (which the Phase 4 batch and humans both rely on).</p>
 
   <ol class="step-list">
     <li><strong>LangSmith integration</strong>: every LLM call traced — inputs, outputs, latency, token counts</li>
     <li><strong>LangFuse integration</strong>: aggregated dashboards — cost per prediction, daily spend, p95 latency</li>
-    <li><strong>Local audit log</strong>: append-only CSV of every prediction with cost + outcome</li>
+    <li><strong>Local audit log</strong>: append-only CSV of every prediction (feeds Phase 4 batch)</li>
     <li><strong>Per-prediction cost tracking</strong>: dollar cost computed and logged for each call</li>
   </ol>
 
@@ -228,7 +259,7 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 5 — PM Artifacts</span>
+    <span class="phase-title">Phase 6 — PM Artifacts</span>
     <span class="phase-status status-future">Pending</span>
   </div>
   <div class="phase-meta">~2 days · Goal: a credible product spec with measured numbers</div>
@@ -252,7 +283,7 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 6 — Polish + Public Documentation</span>
+    <span class="phase-title">Phase 7 — Polish + Public Documentation</span>
     <span class="phase-status status-future">Pending</span>
   </div>
   <div class="phase-meta">~1 day · Goal: portfolio-ready GitHub repo</div>
@@ -276,7 +307,7 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 7 — Onemyle Review</span>
+    <span class="phase-title">Phase 8 — Onemyle Review</span>
     <span class="phase-status status-future">Pending</span>
   </div>
   <div class="phase-meta">~1 week · Goal: formal acknowledgment of the initiative</div>
@@ -299,7 +330,7 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 8 — V2 Productionization (only if Onemyle says go)</span>
+    <span class="phase-title">Phase 9 — V2 Productionization (only if Onemyle says go)</span>
     <span class="phase-status status-future">Future (out of PoC scope)</span>
   </div>
   <div class="phase-meta">~6-8 weeks · Goal: real production deployment at Onemyle</div>
@@ -322,23 +353,29 @@
   <div class="deliverables">📦 <strong>Deliverable:</strong> Production AI feature live in the Onemyle marketplace. Real users. Real impact.</div>
 </div>
 
-<h2>Two kinds of eval — Stage 4 vs Phase 3</h2>
+<h2>Three eval scopes — Phase 3 vs Phase 4 vs inline</h2>
 
-<p>This is the most-confused part of the system. Both Stage 4 (in Phase 2) and Phase 3 do "eval" but at different scales:</p>
+<p>Three different eval scopes, each catching different problems:</p>
 
 <table>
-  <thead><tr><th></th><th>Stage 4 (Quality Gate)</th><th>Phase 3 (Eval Framework)</th></tr></thead>
+  <thead><tr><th></th><th>Inline (in Stage 3)</th><th>Phase 3 (Pre-Deploy)</th><th>Phase 4 (Production Audit)</th></tr></thead>
   <tbody>
-    <tr><td>Runs</td><td>Every prediction at request time</td><td>Every code push (CI) + during dev</td></tr>
-    <tr><td>Against</td><td>THIS specific prediction</td><td>The 50-pair golden set (fixed)</td></tr>
-    <tr><td>Decides</td><td>Surface this prediction OR retry OR reject</td><td>Is this version good enough to ship</td></tr>
-    <tr><td>Failure response</td><td>Block one bad prediction from reaching user</td><td>Block a bad code change from being merged</td></tr>
-    <tr><td>Speed required</td><td>Fast (~50ms per check)</td><td>Can be slow (runs whole golden set)</td></tr>
-    <tr><td>Tools</td><td>Pydantic, custom Python checks, lightweight Ragas</td><td>Ragas (heavy), DeepEval, Promptfoo, regression suite</td></tr>
+    <tr><td>Runs</td><td>Every prediction (real time)</td><td>Every code push (CI)</td><td>Nightly batch on prod logs</td></tr>
+    <tr><td>Against</td><td>THIS prediction's JSON shape</td><td>The 50-pair golden set</td><td>Last 24h of real predictions</td></tr>
+    <tr><td>Catches</td><td>Broken JSON, missing fields</td><td>Systemic regressions before deploy</td><td>Bad individual predictions in prod</td></tr>
+    <tr><td>Decides</td><td>Hard fail / log + continue</td><td>Block PR merge if quality drops</td><td>Flag for review, alert ops team</td></tr>
+    <tr><td>Speed</td><td>Must be ~1ms (Pydantic only)</td><td>Can be slow (runs whole golden set)</td><td>Can be slow (overnight is fine)</td></tr>
+    <tr><td>Tools</td><td>Pydantic only</td><td>Ragas, DeepEval, Promptfoo, regression suite</td><td>Ragas, custom Python checks, dashboard</td></tr>
   </tbody>
 </table>
 
-<p><strong>Analogy:</strong> Stage 4 = airport security (per-passenger). Phase 3 = airline maintenance audit (per-fleet). You need both.</p>
+<p><strong>Analogy:</strong></p>
+<ul>
+  <li><strong>Inline</strong> = passport check at the gate (every passenger, instant, basic)</li>
+  <li><strong>Phase 3</strong> = airline maintenance audit before takeoff (per-fleet)</li>
+  <li><strong>Phase 4</strong> = post-flight safety review (per-flight, after the fact)</li>
+</ul>
+<p>You need all three. Each catches different problems at different speeds.</p>
 
 <h2>What eval actually measures (broader than prompts)</h2>
 
@@ -365,13 +402,14 @@
   <tbody>
     <tr><td>0 — Setup</td><td>"Can I write Python code in this project?"</td></tr>
     <tr><td>1 — Synthetic data</td><td>"What does the marketplace look like?"</td></tr>
-    <tr><td>2 — Cascade pipeline</td><td>"How does AI score a match?"</td></tr>
-    <tr><td>3 — Eval framework</td><td>"Is the AI any good?"</td></tr>
-    <tr><td>4 — Observability</td><td>"Why did the AI say that?"</td></tr>
-    <tr><td>5 — PM artifacts</td><td>"What's the strategic case for this product?"</td></tr>
-    <tr><td>6 — Polish</td><td>"Can a stranger understand what I built?"</td></tr>
-    <tr><td>7 — Onemyle review</td><td>"Is this a real initiative or a hobby project?"</td></tr>
-    <tr><td>8 — V2 prod</td><td>"Should we ship it for real?"</td></tr>
+    <tr><td>2 — Real-time cascade</td><td>"How does AI score a match in real time?"</td></tr>
+    <tr><td>3 — Pre-deploy eval</td><td>"Is this code version good enough to ship?"</td></tr>
+    <tr><td>4 — Production audit batch</td><td>"Are individual predictions in prod actually high quality?"</td></tr>
+    <tr><td>5 — Observability</td><td>"Why did the AI say that?"</td></tr>
+    <tr><td>6 — PM artifacts</td><td>"What's the strategic case for this product?"</td></tr>
+    <tr><td>7 — Polish</td><td>"Can a stranger understand what I built?"</td></tr>
+    <tr><td>8 — Onemyle review</td><td>"Is this a real initiative or a hobby project?"</td></tr>
+    <tr><td>9 — V2 prod</td><td>"Should we ship it for real?"</td></tr>
   </tbody>
 </table>
 
@@ -381,13 +419,14 @@
   <thead><tr><th>After phase</th><th>Interview-ready claim</th></tr></thead>
   <tbody>
     <tr><td>1</td><td>"I built a synthetic marketplace dataset to test marketplace AI patterns"</td></tr>
-    <tr><td>2</td><td>"I designed and built a 3-stage cascade architecture for marketplace match prediction"</td></tr>
-    <tr><td>3</td><td>"I achieved X% precision and Y faithfulness with a regression suite blocking bad PRs"</td></tr>
-    <tr><td>4</td><td>"Every prediction is fully traced and cost-tracked in production-style observability"</td></tr>
-    <tr><td>5</td><td>"I authored the full PM artifact set — PRD, ICP, eval plan, GTM brief, risk register"</td></tr>
-    <tr><td>6</td><td>"You can review the full repo at github.com/..."</td></tr>
-    <tr><td>7</td><td>"This is a formal initiative at Onemyle, where I serve as Investor & Pro Bono Product/AI Lead"</td></tr>
-    <tr><td>8</td><td>"It's now live in production at Onemyle"</td></tr>
+    <tr><td>2</td><td>"I designed and built a 3-stage real-time cascade for marketplace match prediction"</td></tr>
+    <tr><td>3</td><td>"I achieved X% precision and Y faithfulness on golden set with a regression suite blocking bad PRs"</td></tr>
+    <tr><td>4</td><td>"I added an offline production audit batch that catches quality issues post-hoc and surfaces them to a remediation dashboard — same pattern Airbnb / DoorDash use"</td></tr>
+    <tr><td>5</td><td>"Every prediction is fully traced and cost-tracked in production-style observability"</td></tr>
+    <tr><td>6</td><td>"I authored the full PM artifact set — PRD, ICP, eval plan, GTM brief, risk register"</td></tr>
+    <tr><td>7</td><td>"You can review the full repo at github.com/..."</td></tr>
+    <tr><td>8</td><td>"This is a formal initiative at Onemyle, where I serve as Investor & Pro Bono Product/AI Lead"</td></tr>
+    <tr><td>9</td><td>"It's now live in production at Onemyle"</td></tr>
   </tbody>
 </table>
 

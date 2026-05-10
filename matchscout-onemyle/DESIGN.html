@@ -164,9 +164,16 @@
 <!-- ====================================================================== -->
 <div class="part">4. Architecture (3-Stage Cascade)</div>
 
-<h2 id="architecture">3-Stage Cascade Pipeline</h2>
+<h2 id="architecture">3-Stage Real-Time Cascade + Offline Audit (Revised 2026-05-10)</h2>
 
-<p>Industry-standard architecture for marketplace AI. Each stage filters by an order of magnitude, keeping cost and latency manageable while preserving premium reasoning quality where it matters most.</p>
+<p>Industry-standard architecture for marketplace AI. The real-time pipeline keeps the path fast and lean; heavier quality auditing runs OFFLINE on production logs (Phase 4 — see eval section).</p>
+
+<div class="info">
+  <div class="info-title">Architectural decision — runtime gate moved to offline batch (2026-05-10)</div>
+  Original design had a Stage 4 runtime quality gate that ran on every prediction. We moved heavier quality checks (faithfulness, forbidden-term, self-consistency) to an OFFLINE batch audit (Phase 4) that runs on production prediction logs nightly. Real-time pipeline keeps only Pydantic schema validation (free, prevents broken outputs).
+  <br><br>
+  Why: faster real-time response, lower per-prediction cost, simpler real-time pipeline. Trade-off: bad predictions can reach users until next batch run; we mitigate via dashboard alerts + remediation workflow. Standard pattern for marketplace AI (Airbnb, DoorDash, Uber all do this).
+</div>
 
 <div class="ascii-diagram">
 ┌──────────────────────────────────────────────────────────────────┐
@@ -205,6 +212,7 @@
 │  STAGE 3 — LLM AGENT (PREMIUM REASONING)                          │
 │  • LangGraph state machine                                         │
 │  • Claude Sonnet 4.6 (primary) — premium model                    │
+│  • Pydantic schema validation INLINE (~1ms, prevents broken JSON) │
 │  • Analyzes top 10-20 candidates with full context                │
 │  • Outputs: probability + reasoning + risk_flags + action         │
 │                                                                     │
@@ -216,6 +224,29 @@
                               ▼
                      Final ranked matches
                      with full reasoning
+                              │
+                              ├──────► Logged to predictions.csv
+                              │        + LangSmith trace
+                              │
+                              ▼
+                     Surfaced to user
+                     IMMEDIATELY
+
+
+─────────────── OFFLINE (separate, batch) ───────────────────────────
+
+┌──────────────────────────────────────────────────────────────────┐
+│  PHASE 4 — PRODUCTION AUDIT BATCH (nightly or hourly)             │
+│  • Reads prediction logs from last N hours                         │
+│  • Runs heavier quality checks per prediction:                     │
+│       - Ragas faithfulness (was reasoning grounded?)              │
+│       - Forbidden term check (no hallucinated fields?)             │
+│       - Self-consistency (action ↔ probability)                    │
+│       - Confidence threshold violations                            │
+│  • Aggregates results to dashboard                                 │
+│  • Alerts on threshold breaches (e.g., "10% had faithfulness<0.7")│
+│  • Surfaces flagged predictions for human review / remediation    │
+└──────────────────────────────────────────────────────────────────┘
 </div>
 
 <h3>Why this architecture (vs alternatives)</h3>
@@ -297,7 +328,12 @@ def stage2_rank(business, candidates, top_k=20):
 
 <p>Embeddings can be pre-computed and cached. Uses sentence-transformers (free, local, no API costs).</p>
 
-<h3>agent.py — Stage 3 (LangGraph LLM Agent)</h3>
+<h3>agent.py — Stage 3 (LangGraph LLM Agent + Inline Schema Validation)</h3>
+
+<div class="info">
+  <div class="info-title">Stage 3 includes Pydantic schema validation inline</div>
+  Schema validation costs ~1ms and prevents downstream code from crashing on malformed JSON. This is the ONLY runtime quality check. All other checks (faithfulness, forbidden terms, consistency) are deferred to the offline Phase 4 batch audit.
+</div>
 
 <pre><code>from langgraph.graph import StateGraph
 from anthropic import Anthropic
@@ -758,14 +794,16 @@ jobs:
 <table>
   <thead><tr><th>Metric</th><th>Target (V1)</th><th>Stretch (V2)</th></tr></thead>
   <tbody>
-    <tr><td>Cost per prediction (single pair)</td><td>≤ $0.20</td><td>≤ $0.10 (with model routing)</td></tr>
-    <tr><td>Cost per query (top 20 cascade)</td><td>≤ $5.00</td><td>≤ $2.00</td></tr>
+    <tr><td>Cost per prediction (single pair, real-time)</td><td>≤ $0.18</td><td>≤ $0.10 (with model routing)</td></tr>
+    <tr><td>Cost per query (top 20 cascade)</td><td>≤ $4.00</td><td>≤ $2.00</td></tr>
     <tr><td>Latency: Stage 1 (filter)</td><td>≤ 50ms</td><td>≤ 20ms</td></tr>
     <tr><td>Latency: Stage 2 (vector)</td><td>≤ 100ms</td><td>≤ 50ms (with cached embeddings)</td></tr>
-    <tr><td>Latency: Stage 3 (single LLM call)</td><td>≤ 3 sec</td><td>≤ 1.5 sec (with smaller model when possible)</td></tr>
-    <tr><td>Latency: full query (parallelized)</td><td>≤ 5 sec</td><td>≤ 2 sec</td></tr>
-    <tr><td>Faithfulness (Ragas)</td><td>≥ 0.85</td><td>≥ 0.92</td></tr>
-    <tr><td>Precision (golden set)</td><td>≥ 75%</td><td>≥ 85%</td></tr>
+    <tr><td>Latency: Stage 3 (single LLM call)</td><td>≤ 3 sec</td><td>≤ 1.5 sec (smaller model where possible)</td></tr>
+    <tr><td>Latency: full query (parallelized, no inline gate)</td><td>≤ 4 sec</td><td>≤ 2 sec</td></tr>
+    <tr><td>Phase 4 batch — production audit cadence</td><td>nightly</td><td>hourly</td></tr>
+    <tr><td>Phase 4 — flagged predictions threshold for alerting</td><td>&gt; 5% per day</td><td>&gt; 2% per hour</td></tr>
+    <tr><td>Faithfulness (Ragas, measured offline)</td><td>≥ 0.85</td><td>≥ 0.92</td></tr>
+    <tr><td>Precision (golden set, Phase 3 eval)</td><td>≥ 75%</td><td>≥ 85%</td></tr>
   </tbody>
 </table>
 
@@ -835,8 +873,9 @@ jobs:
 │   ├── __init__.py
 │   ├── filter.py                # Stage 1: rules-based hard filter
 │   ├── ranker.py                # Stage 2: vector similarity
-│   ├── agent.py                 # Stage 3: LangGraph + Claude
-│   ├── pipeline.py              # orchestrates Stage 1 → 2 → 3
+│   ├── agent.py                 # Stage 3: LangGraph + Claude (incl. Pydantic schema check)
+│   ├── pipeline.py              # orchestrates Stage 1 → 2 → 3 (real-time)
+│   ├── audit_batch.py           # Phase 4: offline production audit (nightly batch)
 │   ├── observability.py         # LangSmith + LangFuse + local logging
 │   └── schemas.py               # Pydantic models for predictions
 │
@@ -1026,7 +1065,7 @@ jobs:
     <tr><td>LangGraph</td><td>Orchestrates Stage 3 as a multi-step state machine (load → analyze → predict → validate)</td></tr>
     <tr><td>Claude (Anthropic)</td><td>The "brain" inside Stage 3 — does reasoning, generates explanations</td></tr>
     <tr><td>Pydantic</td><td>Schema enforcement — Stage 4 first check</td></tr>
-    <tr><td>Custom Python (gate.py)</td><td>Stage 4 quality gates (confidence, consistency, etc.)</td></tr>
+    <tr><td>Custom Python (audit_batch.py)</td><td>Phase 4 offline audit on production logs (revised — moved from inline to batch)</td></tr>
     <tr><td>Ragas</td><td>Faithfulness scoring — used in offline eval AND lightweight runtime check</td></tr>
     <tr><td>DeepEval</td><td>pytest-style tests run in CI to catch behavioral regressions</td></tr>
     <tr><td>Promptfoo</td><td>A/B test prompt variants when the team is iterating on prompts</td></tr>
