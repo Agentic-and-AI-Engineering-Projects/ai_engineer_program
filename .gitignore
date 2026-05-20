@@ -12,6 +12,14 @@ build/
 .chroma/
 *.db
 
+# Working artifacts — session scratch, not source code
+plan.txt
+plan_checkpoint_*.py
+.vscode/
+
+# Personal — interview prep stays local on a public repo
+INTERVIEW_STUDY_GUIDE.html
+
 # Sensitive — never commit
 .claude/
 RESUME_RAJESH_RAMANI.*

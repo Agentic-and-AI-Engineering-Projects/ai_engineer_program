@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MatchScout — Interview Pitch Cheat Sheet</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 30px 40px;
+    color: #222; line-height: 1.6; background: #fafbfc;
+  }
+  header { border-bottom: 3px solid #1a4d8f; padding-bottom: 14px; margin-bottom: 24px; }
+  h1 { margin: 0; color: #1a4d8f; font-size: 26pt; }
+  .subtitle { color: #666; font-size: 11pt; margin-top: 6px; }
+  h2 {
+    color: #1a4d8f; margin-top: 38px; padding-bottom: 6px;
+    border-bottom: 2px solid #e1e7f0; font-size: 17pt;
+  }
+  h3 { color: #1a4d8f; margin-top: 24px; font-size: 13pt; }
+  h4 { color: #455770; margin-top: 18px; font-size: 11.5pt; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 8px 0 12px 24px; }
+  li { margin: 4px 0; }
+  code {
+    background: #eef2f7; padding: 1.5px 6px; border-radius: 3px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 10.5pt; color: #1a4d8f;
+  }
+
+  table {
+    border-collapse: collapse; width: 100%; margin: 14px 0;
+    background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.06); font-size: 10.5pt;
+  }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f0f4fa; color: #1a4d8f; font-weight: 600; }
+  td:first-child { font-weight: 600; color: #2c4061; width: 30%; }
+
+  /* The killer sentence — top-of-doc callout */
+  .killer {
+    background: linear-gradient(135deg, #1a4d8f 0%, #2c5fa5 100%);
+    color: white; padding: 22px 26px; margin: 18px 0 26px 0;
+    border-radius: 8px; box-shadow: 0 3px 10px rgba(26,77,143,0.25);
+  }
+  .killer .label {
+    text-transform: uppercase; font-size: 9.5pt; font-weight: 600;
+    letter-spacing: 1.2px; opacity: 0.85; margin-bottom: 8px;
+  }
+  .killer .sentence { font-size: 14pt; font-style: italic; line-height: 1.5; }
+
+  /* Quote / prepared-answer styling */
+  .answer {
+    background: #f6f8fb; border-left: 4px solid #1a4d8f;
+    padding: 12px 18px; margin: 12px 0 18px 0;
+    font-size: 11pt; color: #2c3e50; line-height: 1.65;
+  }
+  .answer.q { font-weight: 600; color: #1a4d8f; border-left-color: #f9a825; background: #fffaf0; padding: 8px 16px; margin-bottom: 4px; }
+
+  /* Layered narrative cards */
+  .layer-card {
+    background: white; border: 1px solid #e1e7f0; border-left: 4px solid #1a4d8f;
+    padding: 14px 20px; margin: 12px 0; border-radius: 4px;
+  }
+  .layer-card .layer-label {
+    color: #1a4d8f; font-weight: 700; font-size: 10pt; text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 6px;
+  }
+  .layer-card .duration { color: #888; font-size: 9.5pt; font-weight: normal; margin-left: 8px; }
+
+  /* Warning / what-NOT-to-claim callouts */
+  .warn {
+    background: #fff3cd; border-left: 4px solid #f9a825;
+    padding: 14px 18px; margin: 18px 0; border-radius: 4px; font-size: 10.5pt;
+  }
+  .warn-title { color: #856404; font-weight: 700; margin-bottom: 6px; font-size: 10.5pt; }
+
+  /* Success / positive callouts */
+  .info {
+    background: #f0f4fa; border-left: 4px solid #1a4d8f;
+    padding: 14px 18px; margin: 18px 0; border-radius: 4px; font-size: 10.5pt;
+  }
+  .info-title { color: #1a4d8f; font-weight: 700; margin-bottom: 6px; font-size: 10.5pt; }
+
+  /* Resume + LinkedIn snippet boxes */
+  .snippet {
+    background: white; border: 1px solid #d1dbe9;
+    padding: 16px 20px; margin: 12px 0; border-radius: 6px;
+    font-size: 10.5pt; line-height: 1.65;
+  }
+  .snippet-label {
+    color: #1a4d8f; font-weight: 700; text-transform: uppercase;
+    font-size: 9.5pt; letter-spacing: 0.8px; margin-bottom: 8px;
+  }
+
+  /* TOC */
+  .toc {
+    background: white; border: 1px solid #e1e7f0; padding: 16px 22px;
+    margin: 14px 0 28px 0; border-radius: 4px; font-size: 10.5pt;
+  }
+  .toc-title { font-weight: 700; color: #1a4d8f; margin-bottom: 8px; }
+  .toc a { color: #2c5fa5; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  footer { margin-top: 50px; padding-top: 16px; border-top: 1px solid #ddd; color: #888; font-size: 9pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MatchScout — Interview Pitch Cheat Sheet</h1>
+  <div class="subtitle">
+    Personal prep doc. Read 30 minutes before any interview where MatchScout might come up.
+  </div>
+</header>
+
+<div class="toc">
+  <div class="toc-title">Contents</div>
+  <a href="#killer">The killer sentence</a> ·
+  <a href="#layered">Layered narrative (4 layers)</a> ·
+  <a href="#audience">Audience-by-audience framing</a> ·
+  <a href="#qa">Robustness Q&A (10 prepared answers)</a> ·
+  <a href="#v2-memory">V2 roadmap — memory + Agent SDK</a> ·
+  <a href="#not-claim">What NOT to claim</a> ·
+  <a href="#pytest">Pytest &amp; testing</a> ·
+  <a href="#github-actions">GitHub Actions &amp; CI</a> ·
+  <a href="#resume">Resume bullet + LinkedIn snippet</a>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="killer">The killer sentence (use for most interviews)</h2>
+
+<div class="killer">
+  <div class="label">Pre-rehearsed — say word-for-word the first time</div>
+  <div class="sentence">
+    "I built a recommender system for a B2B creator marketplace. It's a
+    two-stage retrieval pipeline with an LLM re-ranker on top, and I held
+    out 10% of gigs as a no-LLM control to measure whether the LLM was
+    actually moving outcome metrics."
+  </div>
+</div>
+
+<h3>Why this sentence works</h3>
+<ul>
+  <li><strong>Sounds humble</strong> — "recommender system" is familiar territory</li>
+  <li><strong>Demonstrates rigor</strong> — "held out a control" signals real engineering discipline</li>
+  <li><strong>Implies sophistication without name-dropping</strong> — "LLM re-ranker" is a clean technical term</li>
+  <li><strong>Invites the right follow-ups</strong> — interviewer pulls on whichever thread they care about</li>
+  <li>You let depth come out through questions, not by pushing it on them</li>
+</ul>
+
+<!-- ====================================================================== -->
+<h2 id="layered">Layered narrative — simple at the top, deep when probed</h2>
+
+<div class="layer-card">
+  <div class="layer-label">Layer 1 — One sentence <span class="duration">(busy hiring manager, recruiter screening)</span></div>
+  <div class="answer">
+    "I built a recommender system that suggests 3 creators when a business posts a job in a creator marketplace."
+  </div>
+</div>
+
+<div class="layer-card">
+  <div class="layer-label">Layer 2 — 30 seconds <span class="duration">(curious recruiter, casual mention)</span></div>
+  <div class="answer">
+    "It's a two-stage retrieval pipeline — rules-based filtering followed by sentence-transformer cosine ranking — that narrows the catalog to 10 candidates. Then a Claude-based LLM picks the final 3 with reasoning. I held out 10% of gigs as a no-LLM control so I could causally measure whether the LLM was actually adding value over plain cosine ranking."
+  </div>
+</div>
+
+<div class="layer-card">
+  <div class="layer-label">Layer 3 — 2 minutes <span class="duration">(technical interview, hiring manager who's engaged)</span></div>
+  <div class="answer">
+    "Three stages: hard filter on location / budget / content-type → sentence-transformer cosine over a rich embedding that includes profile bios + categories → LLM re-ranker for 90% of gigs. The other 10% are a no-LLM control that just takes the top 3 by cosine — that's the baseline I measure against. The LLM reasons over each candidate's recent gig history and per-metric ranks within the top-10 set, using a versioned prompt template. Outcome dashboard segments by treatment arm AND prompt version, with chi-squared significance, so prompt iteration is empirically driven against real outcomes. Pre-deploy eval is just a pytest schema smoke test — no synthetic golden set, because golden sets on synthetic data don't predict production outcomes. Ragas, DeepEval, Promptfoo are dev-time tools I use during prompt iteration, not CI gates."
+  </div>
+</div>
+
+<div class="layer-card">
+  <div class="layer-label">Layer 4 — Deep dive <span class="duration">(when they pull on a thread)</span></div>
+
+  <table>
+    <thead><tr><th>If they ask about...</th><th>Talk about...</th></tr></thead>
+    <tbody>
+      <tr><td>The LLM stage</td><td>LangGraph state machine, single versioned prompt template loaded from file, Pydantic-validated structured output, per-creator strengths / risks / reliability_estimate / campaign_value</td></tr>
+      <tr><td>The retrieval stage</td><td>sentence-transformers/all-MiniLM-L6-v2, cosine similarity, embedding text combines niche_tags + profile_description + primary_category + secondary_categories + primary_subcategories on both sides</td></tr>
+      <tr><td>The eval framework</td><td>Outcome-based: acceptance rate, top-1 selection, gig success rate, composite good-outcome rate, chi-squared significance between arms and between prompt versions. Streamlit dashboard. No synthetic golden set — deliberately.</td></tr>
+      <tr><td>Why no pre-deploy eval</td><td>Synthetic golden sets on synthetic data are intellectually satisfying but don't predict production outcomes. Mature production teams (Airbnb, DoorDash) deploy LLM features behind A/B tests with minimal pre-deploy eval. CI runs only a schema smoke test that catches broken code, not bad LLM output.</td></tr>
+      <tr><td>Observability</td><td>LangSmith trace per recommendation, LangFuse rolling per-arm + per-prompt-version dashboards, drill-down from Streamlit dashboard</td></tr>
+      <tr><td>Cold-start</td><td>Profile descriptions are stored fields on each creator and business (written at signup; for PoC, synthesized via Claude). They're part of Stage 2's embedding text and part of the LLM's context. Within Arm 2, when a candidate has sparse past-gig data, the LLM marks reliability_estimate as "low" and weighs profile alignment + follower count more heavily.</td></tr>
+      <tr><td>Statistical rigor</td><td>Chi-squared significance test between Arm 1 and Arm 2 on composite good-outcome rate. Honest framing: "results are directional, not yet significant at N=X."</td></tr>
+      <tr><td>The prompt</td><td>Stored as a versioned text file (<code>prompts/arm2_v1.txt</code>). <code>agent.py</code> loads by version. Each recommendation row stamps the prompt_version. Outcome dashboard segments by it. That's the iteration loop.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="audience">Audience-by-audience framing</h2>
+
+<p>Same project. Five legitimate framings. Pick based on who's listening.</p>
+
+<table>
+  <thead><tr><th>Audience</th><th>What you call it</th></tr></thead>
+  <tbody>
+    <tr><td>AI Engineer / LLM-shop interview</td><td>"Gig-driven recommender with LLM re-ranking, outcome A/B causal eval, versioned prompt templates"</td></tr>
+    <tr><td>ML Engineer interview</td><td>"Two-stage retrieval system — rules + vector — with an LLM re-ranker, A/B tested against a no-LLM baseline"</td></tr>
+    <tr><td>Generic software role</td><td>"A recommender system for a creator marketplace, with a built-in A/B test framework"</td></tr>
+    <tr><td>AI PM / Product role</td><td>"An AI feature with a built-in A/B test against a no-LLM baseline — measured acceptance, top-1 selection, and gig success rate"</td></tr>
+    <tr><td>Marketplace-specific (Airbnb / DoorDash / Upwork)</td><td>"Standard marketplace cascade — candidate generation → ranking → personalized re-ranking — same pattern your search and recommendation stack uses"</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2 id="qa">Robustness Q&A — likely tough questions, prepared answers</h2>
+
+<div class="answer q">Q: "How do you know the LLM is actually helping?"</div>
+<div class="answer">
+  "That's exactly what the A/B measures. 10% of gigs go to a no-LLM control — top 3 by cosine score. The other 90% go through the LLM. We compare acceptance rate, top-1 selection rate, and gig success rate per arm, with chi-squared significance. If the LLM arm doesn't beat the control, we know it isn't earning its cost — and we'd shrink Arm 2 or iterate the prompt."
+</div>
+
+<div class="answer q">Q: "Why not just use cosine similarity / why bother with the LLM?"</div>
+<div class="answer">
+  "Honestly, on synthetic structured data, a hand-tuned scoring function might do most of what the LLM does. The LLM earns its place by reasoning over <em>relational</em> history that cosine can't see — 'this creator has 8 successful gigs and only 1 failed in this category' or 'this candidate has high followers but a poor reliability track record.' That's structured reasoning over multiple signals, not vibe matching. The A/B is exactly how we verify whether it's worth the cost."
+</div>
+
+<div class="answer q">Q: "Why don't you have a pre-deploy eval / golden set?"</div>
+<div class="answer">
+  "Deliberate choice. Synthetic golden sets on synthetic data are intellectually satisfying but they don't predict production outcomes — they grade your own homework. Outcome A/B against a no-LLM control is what mature production teams use (Airbnb, DoorDash, Etsy), and I followed that pattern. CI runs only a pytest schema smoke test — catches broken code, not bad LLM output. The actual quality eval is the outcome dashboard, segmented by treatment arm and prompt version."
+</div>
+
+<div class="answer q">Q: "What's the cold-start problem and how did you handle it?"</div>
+<div class="answer">
+  "When a new creator or business has no past gigs, the LLM's history-based reasoning has less to work with. I handle it implicitly — profile descriptions are stored fields on every creator and business (written at signup, like an Instagram bio). They're part of Stage 2's embedding text and part of the LLM's context. When a candidate has sparse past-gig data, the LLM marks reliability_estimate as 'low' and weighs profile alignment more heavily. No separate cold-start arm — that was a design I considered and rejected because it complicates the experiment without buying much."
+</div>
+
+<div class="answer q">Q: "How do you guard against LLM hallucination?"</div>
+<div class="answer">
+  "Three layers. First, Pydantic schema validation inline — runtime guard against malformed output. Second, the outcome dashboard catches degradation post-hoc: if acceptance rate drops, that's the signal that prompt or LLM behavior changed. Third, during prompt iteration, I use Ragas faithfulness on a sample of recent outputs to confirm grounding, and DeepEval assertions to check that cited past gigs actually exist in the database. These are dev-time tools, not CI gates."
+</div>
+
+<div class="answer q">Q: "How does prompt iteration actually work?"</div>
+<div class="answer">
+  "The prompt is a versioned template file — <code>prompts/arm2_v1.txt</code>. When I want to iterate, I copy it to <code>arm2_v2.txt</code>, edit, bump PROMPT_VERSION, deploy. Every recommendation row stamps which prompt version produced it. The outcome dashboard segments metrics by <code>(treatment_arm, prompt_version)</code>, so I can causally measure v1 vs v2 on real outcomes. Promptfoo helps me preview a new prompt against recent gigs side-by-side with the current one before deploying. Iteration loop is: deploy → measure → diagnose with traces → edit prompt → bump version → measure again."
+</div>
+
+<div class="answer q">Q: "What's the cost?"</div>
+<div class="answer">
+  "$0 for Arm 1 (no LLM). About $0.30 per gig for Arm 2. At marketplace scale that's a real operating cost, which is why the control arm matters — if the LLM isn't lifting outcomes enough to justify $0.30/gig, we'd shrink Arm 2 and lean on cosine ranking. V2 brings that cost down — see the V2 roadmap section below."
+</div>
+
+<div class="answer q">Q: "What's the biggest weakness?"</div>
+<div class="answer">
+  "Statistical power. With a small PoC dataset, the A/B doesn't reach significance — results are directional, not conclusive. Production validation needs N ≥ 100 per arm over weeks. We're honest about that in the PRD. Also: the synthetic data limits how well outcome metrics generalize. The methodology is solid; the numbers will be more meaningful once real Onemyle data flows through it."
+</div>
+
+<div class="answer q">Q: "Why Claude over GPT-4 / Gemini?"</div>
+<div class="answer">
+  "Claude Sonnet 4.6 hit the cost-quality point we needed. The architecture abstracts the LLM call behind a single function, so swapping providers is a 10-line change. For V2, multi-cloud routing (Bedrock primary, OpenAI fallback) is on the roadmap."
+</div>
+
+<div class="answer q">Q: "Is this in production at Onemyle?"</div>
+<div class="answer">
+  "It's a PoC validated on synthetic data — productionization is pending Onemyle's roadmap prioritization. I lead the initiative as their Pro Bono Product/AI Lead and Investor. The full design docs, dashboard, and PM artifacts are real and complete; what's pending is the integration with their live data."
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="v2-memory">V2 roadmap — memory layer + Agent SDK subagents</h2>
+
+<div class="info">
+  <div class="info-title">Why this section exists</div>
+  V2 has two coherent engineering investigations, both pinned to MatchScout's actual V1 limitations:
+  <ul style="margin-top:8px;">
+    <li><strong>Memory layer</strong> (Zep / Mem0 / Anthropic Memory tool / Letta benchmarked) — solves V1's context bloat. Compresses raw history into compact priors.</li>
+    <li><strong>Agent SDK subagent rebuild of Stage 3</strong> — solves V1's hallucination risk + adds self-improvement. Decomposes the single LLM call into specialized subagents.</li>
+  </ul>
+  They're multiplicative: memory compresses data, subagents distribute work. Each subagent reads only its compact memory slice.
+</div>
+
+<h3>The V1 inefficiency (stated plainly)</h3>
+
+<p>Every Arm 2 recommendation in V1 re-loads the same raw data and re-reasons from scratch:</p>
+
+<pre style="background: #f6f8fa; padding: 12px 16px; border-radius: 4px; font-size: 10pt; line-height: 1.5;">
+Input to Stage 3 per gig (Arm 2):
+  - Gig brief                                       ~  200 tokens
+  - 10 candidate profiles (full)                    ~1,500 tokens
+  - 10 candidates × up to 10 past gigs each         ~3,000 tokens
+  - Per-metric ranks within the 10                  ~  200 tokens
+  ─────────────────────────────────────────────────
+  Total                                             ~5,000 tokens
+</pre>
+
+<p>~5K input tokens per gig forever. And the LLM keeps re-discovering things it should already know.</p>
+
+<h3>V2 memory architecture</h3>
+
+<table>
+  <thead><tr><th>Memory type</th><th>Content</th><th>Replaces</th></tr></thead>
+  <tbody>
+    <tr><td>Business memory</td><td>Distilled per-business preferences ("rejects creators &gt;100K followers", "prefers avg rating ≥ 4.5", "Boston-local only")</td><td>Re-reading business's past gigs</td></tr>
+    <tr><td>Creator memory</td><td>Distilled persona per creator ("reliable, 8/10 successful", "specializes Italian fine dining", "responds in ~3 hrs")</td><td>Re-reading 10 past gigs per candidate</td></tr>
+    <tr><td>Pattern memory</td><td>System-level priors ("Italian fine-dining + natural_lighting tag → 87% success", "gigs &lt; $500 → 23% fail rate")</td><td>Re-deriving patterns each call</td></tr>
+    <tr><td>Reflexion memory</td><td>LLM's self-critiques across gigs ("I over-weighted follower count last week; correct for it")</td><td>(new capability — V1 has none)</td></tr>
+    <tr><td>LLM bypass</td><td>If memory consensus is high-confidence, skip Stage 3 LLM entirely</td><td>Unconditional LLM call</td></tr>
+  </tbody>
+</table>
+
+<h3>V1 vs V2 token + cost comparison</h3>
+
+<table>
+  <thead><tr><th>Component</th><th>V1 tokens</th><th>V2 tokens</th><th>Δ</th></tr></thead>
+  <tbody>
+    <tr><td>Gig brief</td><td>200</td><td>200</td><td>—</td></tr>
+    <tr><td>Candidate profiles (10)</td><td>1,500</td><td>500 (distilled personas)</td><td>−67%</td></tr>
+    <tr><td>Past gigs (10 × 10 raw)</td><td>3,000</td><td>0 (replaced by distilled memory)</td><td>−100%</td></tr>
+    <tr><td>Business memory</td><td>0</td><td>100</td><td>+100</td></tr>
+    <tr><td>Pattern memory</td><td>0</td><td>100</td><td>+100</td></tr>
+    <tr><td>Ranks within 10</td><td>200</td><td>200</td><td>—</td></tr>
+    <tr><td><strong>Total per gig</strong></td><td><strong>~5,000</strong></td><td><strong>~1,100</strong></td><td><strong>~−78%</strong></td></tr>
+  </tbody>
+</table>
+
+<p>Plus 10–30% of gigs skip the LLM entirely (high-confidence memory consensus path).</p>
+
+<h3>Concrete V2 gains</h3>
+
+<table>
+  <thead><tr><th>Metric</th><th>V1</th><th>V2 (memory-driven)</th></tr></thead>
+  <tbody>
+    <tr><td>Input tokens per LLM gig</td><td>~5,000</td><td>~1,100</td></tr>
+    <tr><td>LLM cost per gig (Arm 2)</td><td>~$0.30</td><td>~$0.08</td></tr>
+    <tr><td>Latency per gig</td><td>~3s</td><td>~1–1.5s</td></tr>
+    <tr><td>Personalization</td><td>None (stateless)</td><td>Per-business preferences learned over time</td></tr>
+    <tr><td>Cold-start handling</td><td>Profile-only</td><td>Pattern-memory-augmented</td></tr>
+    <tr><td>Self-improvement loop</td><td>None</td><td>Reflexion memory accumulates lessons</td></tr>
+  </tbody>
+</table>
+
+<p>At 1,000 gigs/month: <strong>$300 V1 → ~$80 V2 (~73% cost reduction).</strong></p>
+
+<h3>Prepared interview answers — when V2 / memory comes up</h3>
+
+<div class="answer q">Q: "How would you optimize MatchScout V1?"</div>
+<div class="answer">
+  "The biggest inefficiency is that V1 re-feeds raw past-gig history on every recommendation — about 5,000 input tokens per gig, most of which is the same history the system has seen before. V2 introduces a memory layer that distills history into compact priors: per-business preferences, per-creator personas, cross-gig patterns, and reflexion-style self-critiques. The LLM reads compact memory snippets instead of raw rows. Result: ~78% reduction in input tokens, ~73% LLM-cost reduction, ~50% latency reduction. Plus a fraction of gigs can skip the LLM entirely when memory consensus is high-confidence."
+</div>
+
+<div class="answer q">Q: "Which memory framework would you use for V2?"</div>
+<div class="answer">
+  "Depends on the workload. I benchmarked four — Zep, Mem0, Anthropic's native Memory tool, and Letta — on MatchScout's actual memory workload. Short version: Mem0 for semantic facts (business preferences as text), Zep for temporal/episodic queries (when did biz_042 last reject a creator and why), Anthropic Memory tool when you want minimal infra and the system is Claude-native, Letta when business histories become very long (multi-year accumulation). For MatchScout V2 specifically, I'd lean Mem0 + Anthropic Memory tool combined — Mem0 for distilled preferences, Anthropic's tool for conversational continuity within a recommendation cycle."
+</div>
+
+<div class="answer q">Q: "How does the memory get updated?"</div>
+<div class="answer">
+  "Async, after each gig completes. The pipeline doesn't wait. When outcome is known (business picked a creator, gig succeeded or failed, ratings collected), a small post-processing job updates business memory ('biz_042 picked creator_X over Y on a $700 budget; succeeded'), creator memory ('creator_X: +1 success in food_beverage'), and feeds the LLM's self-critique into reflexion memory. The next recommendation reads the updated state. Recommendation latency is unaffected."
+</div>
+
+<h3 style="margin-top:34px;">Stage 3 redesign — Agent SDK subagent architecture</h3>
+
+<p>V2's second investigation: rebuild V1's single LangGraph LLM call as a decomposed subagent pattern using the Claude Agent SDK.</p>
+
+<table>
+  <thead><tr><th>Subagent</th><th>Job</th><th>Reads from memory</th></tr></thead>
+  <tbody>
+    <tr><td>History / context subagent</td><td>Fetch business memory + creator personas relevant to this gig</td><td>Business memory + creator memory (compact)</td></tr>
+    <tr><td>Reasoner subagent</td><td>Pick top 3 from the 10 candidates given the compact context</td><td>Synthesized output from history subagent</td></tr>
+    <tr><td><strong>Fact-checker subagent</strong></td><td><strong>Validate the reasoner's cited past_gigs / signals actually exist in the database. Catches hallucinations INLINE before the recommendation ships.</strong></td><td>Specific cited facts + targeted DB lookups</td></tr>
+    <tr><td>Critic subagent (Reflexion)</td><td>Review the recommendation, request revision if inconsistencies, write self-critique into Reflexion memory for future calls</td><td>Recommendation + relevant past Reflexion entries</td></tr>
+  </tbody>
+</table>
+
+<h3>Why memory + subagents work multiplicatively</h3>
+
+<p><strong>Memory makes subagents affordable. Subagents make memory access targeted.</strong> Without memory, decomposing into 5 subagents would each load thousands of tokens of redundant raw history → cost balloons. With memory, each subagent gets only its compact slice (~400 tokens), making decomposition tractable.</p>
+
+<table>
+  <thead><tr><th></th><th>V1</th><th>V2 (memory only)</th><th>V2 (subagents only)</th><th>V2 (memory + subagents)</th></tr></thead>
+  <tbody>
+    <tr><td>Tokens per gig</td><td>~5,000</td><td>~1,100</td><td>~11,000</td><td>~2,000</td></tr>
+    <tr><td>LLM calls per gig</td><td>1</td><td>1</td><td>5</td><td>5</td></tr>
+    <tr><td>Latency (parallelized)</td><td>~3s</td><td>~1-1.5s</td><td>~5-6s</td><td>~3-4s</td></tr>
+    <tr><td>Cost vs V1</td><td>baseline</td><td>~−73%</td><td>+200-300%</td><td>≈ similar to V1</td></tr>
+    <tr><td>Hallucination guard</td><td>post-hoc</td><td>post-hoc</td><td><strong>inline</strong></td><td><strong>inline</strong></td></tr>
+    <tr><td>Self-improvement</td><td>none</td><td>none</td><td><strong>Reflexion</strong></td><td><strong>Reflexion</strong></td></tr>
+    <tr><td>Personalization</td><td>none</td><td><strong>per-business</strong></td><td>none</td><td><strong>per-business</strong></td></tr>
+  </tbody>
+</table>
+
+<p>The win isn't raw cost reduction — it's <strong>same cost with materially better quality</strong>. V1 was deliberately simple; V2 trades that simplicity for inline hallucination guards and continuous self-improvement.</p>
+
+<h3>Prepared interview answers — when Agent SDK / subagents come up</h3>
+
+<div class="answer q">Q: "Have you used Claude Agent SDK?"</div>
+<div class="answer">
+  "Yes — I designed MatchScout V2's Stage 3 on it. V1 uses a single LangGraph LLM call inside Stage 3 Arm 2. V2 decomposes that into specialized subagents — history/context, reasoner, fact-checker, and a Reflexion critic — using the Agent SDK's subagent primitives. The fact-checker subagent is the headline feature: it validates the reasoner's cited past_gigs against the database BEFORE the recommendation emits, catching hallucinations inline instead of post-hoc. The Reflexion critic writes self-critiques into memory across gigs, so the agent learns from its own past mistakes."
+</div>
+
+<div class="answer q">Q: "Why use the Agent SDK if LangGraph already works?"</div>
+<div class="answer">
+  "Different tools, different sweet spots. LangGraph is right for V1 — explicit state machine, one LLM call, vendor neutrality. V2 isn't replacing LangGraph wholesale; just swapping the internals of the Stage 3 node. The Agent SDK earns its place when you want native subagent patterns, Anthropic Memory tool integration, and Reflexion loops without hand-rolling them. LangGraph stays for the higher-level pipeline orchestration; Agent SDK runs inside the Stage 3 node."
+</div>
+
+<div class="answer q">Q: "Doesn't a 5-subagent decomposition cost more than one LLM call?"</div>
+<div class="answer">
+  "It would, if memory weren't compressing the data. Five subagents each loading 5K tokens of raw history is 25K tokens total — much more than V1. But with the memory layer compressing inputs to ~400 tokens per subagent slice, the total is around 2K tokens across 5 calls — comparable to V1's single 5K-token call. So memory and subagents are multiplicative: memory makes the decomposition affordable, subagents make the memory access targeted. Net cost is similar to V1; the win is quality (inline fact-check, Reflexion, personalization)."
+</div>
+
+<div class="answer q">Q: "Why the fact-checker subagent specifically?"</div>
+<div class="answer">
+  "Hallucination in MatchScout would mean the recommender citing a past gig that doesn't exist — e.g., 'creator_042 had 8 successful gigs at this business' when the DB shows 2. In V1 I catch that post-hoc via Ragas faithfulness during dev-time iteration. The fact-checker subagent catches it INLINE — it sees what the reasoner cited and validates each claim against the database before the recommendation emits. That's a real product win: hallucinations never reach the business in V2."
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="not-claim">What NOT to claim (honest framing)</h2>
+
+<div class="warn">
+  <div class="warn-title">Overclaiming kills credibility faster than under-claiming</div>
+  The honest framing — "PoC validated on synthetic data, productionization pending" — actually plays well in interviews. It signals self-awareness.
+</div>
+
+<table>
+  <thead><tr><th>Don't say</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>"I have a production AI recommender at Onemyle"</td><td>It's a PoC; productionization pending</td></tr>
+    <tr><td>"The system has been A/B tested with real users"</td><td>Synthetic gig data only</td></tr>
+    <tr><td>"Acceptance rate is X% in production"</td><td>That's a target, not a measured production number</td></tr>
+    <tr><td>"I'm an employee / contractor / consultant at Onemyle"</td><td>Pro bono Product/AI Lead + angel investor — accurate, defensible</td></tr>
+    <tr><td>"It generated $X in marketplace revenue"</td><td>No production deployment yet</td></tr>
+    <tr><td>"MatchScout V2 is live"</td><td>V2 is roadmap / R&D — P9 memory benchmark informs V2 design, doesn't deploy it</td></tr>
+  </tbody>
+</table>
+
+<h3>The two sentences I will not skip</h3>
+
+<p>When the interview is technical and they want depth, lean on <strong>Layer 3</strong>. When the interview is broader (PM, generalist software, recruiter), lean on the <strong>killer sentence</strong> at the top of this doc. Both are pre-rehearsed — say them word-for-word the first time, then improvise from there.</p>
+
+<!-- ====================================================================== -->
+<h2 id="pytest">Pytest &amp; testing — what to say if asked</h2>
+
+<p>Testing is a near-guaranteed interview question. Three rules: be honest about
+scope (it's a smoke test, not an eval), explain WHY that was the right choice for
+this product, and have one concrete piece of code in your head you can walk through.</p>
+
+<div class="answer q">"How did you test the MatchScout pipeline?"</div>
+<div class="answer">
+"Pytest smoke test on every push — about 50 lines, two test cases covering the
+pure stage functions (filter, ranker, no-LLM recommendation builder). It catches
+structural breakage — broken imports, schema validation, wrong rank set,
+hallucinated creator IDs — in under a second. The real eval isn't CI; it's the
+two-arm outcome A/B dashboard. CI is the tripwire, the dashboard is the verdict."
+</div>
+
+<div class="answer q">"Why no quality threshold in CI?"</div>
+<div class="answer">
+"Synthetic golden sets ossify and stop reflecting real usage. For a recommender
+on a live marketplace, the truth is downstream gig outcomes — acceptance rate,
+gig success rate, business rating — segmented by treatment arm and prompt
+version. CI checks that the code still runs; the dashboard checks that the model
+still works. Different jobs, different gates. Putting a faithfulness threshold
+in CI would gate every push on a metric that may not predict the metric I
+actually care about."
+</div>
+
+<div class="answer q">"Why pytest specifically?"</div>
+<div class="answer">
+"De-facto standard for Python. Plain function tests, plain <code>assert</code>
+statements — pytest rewrites assertion bytecode so a failed comparison shows you
+both sides without helper methods. Fixtures give dependency-injected setup that
+composes cleanly. For a single-developer PoC the boilerplate-free style matters;
+for production the fixture system scales to shared DB / model / API setup."
+</div>
+
+<div class="answer q">"What does your test NOT catch?"</div>
+<div class="answer">
+"It bypasses the LangGraph graph and calls the stage functions directly. That
+keeps CI side-effect-free (no DB writes) and means no <code>ANTHROPIC_API_KEY</code>
+secret in CI. The cost: it doesn't catch graph-wiring bugs — bad routing
+functions, miswired edges, a broken persist node. Those are caught by the local
+<code>--all</code> run before any push, and by LangSmith tracing in Phase 5. For
+a low-traffic PoC the tradeoff is fine; at higher traffic I'd add an integration
+test that invokes the graph against an in-memory or fixture DB."
+</div>
+
+<div class="answer q">"How do you handle test isolation / state between tests?"</div>
+<div class="answer">
+"Fixtures with the right scope. <code>sample_gig</code> uses
+<code>scope='module'</code> so <code>db.list_gigs()</code> runs once and the value
+is reused across tests in the file — cheap setup, no per-test repetition. Because
+the tests treat the fixture as read-only and never write to the DB, they're
+trivially re-runnable in any order. Wider scopes are a footgun only when tests
+mutate shared state — which is why I designed the smoke test around the pure
+stage functions instead of <code>recommend_creators()</code>."
+</div>
+
+<div class="warn">
+<div class="warn-title">⚠ What NOT to say</div>
+<ul>
+  <li><strong>Don't claim "comprehensive test coverage."</strong> Two tests on the
+  no-LLM path is a smoke test, not coverage. Senior interviewers catch overclaims
+  immediately.</li>
+  <li><strong>Don't say "I evaluate the LLM in CI."</strong> You don't — the LLM arm
+  isn't called in CI. Be honest about the scope; interviewers value the design
+  reasoning ("CI is the tripwire, outcomes are the eval") more than a misleading
+  claim.</li>
+  <li><strong>Don't use <code>assert</code> for production input validation.</strong>
+  <code>assert</code> statements are stripped under <code>python -O</code>. Use
+  <code>if not X: raise ValueError(...)</code> for runtime checks. Volunteering this
+  distinction when asked about defensive code is a senior signal.</li>
+</ul>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="github-actions">GitHub Actions &amp; CI — what to say if asked</h2>
+
+<p>If pytest is the "how do you test it?" question, GitHub Actions is the "how does
+that get enforced?" follow-up. Rules of engagement: lead with the mental model
+(config-as-code, ephemeral runners), name the trigger granularity, and have an
+honest answer about monorepo handling.</p>
+
+<div class="answer q">"How does your CI work end-to-end?"</div>
+<div class="answer">
+"GitHub Actions, defined as a YAML file at <code>.github/workflows/smoke.yml</code>.
+On every push or PR that touches <code>matchscout-onemyle/</code>, GitHub spins up
+a fresh Ubuntu runner, clones the repo, installs deps, seeds a SQLite DB from
+committed CSVs, and runs <code>pytest</code>. About 30 seconds end-to-end. Pass /
+fail shows up as a commit status check on GitHub. CI is config-as-code — the YAML
+is reviewable in PRs alongside the code it tests."
+</div>
+
+<div class="answer q">"What's an 'action' in GitHub Actions?"</div>
+<div class="answer">
+"A reusable package — actually a git repo — that a workflow step calls via
+<code>uses: owner/repo@version</code>. <code>actions/checkout@v4</code> is the
+official one that clones your code; <code>actions/setup-python@v5</code> is the
+official one that installs Python. Inside the workflow you mix
+<code>uses:</code> steps (call someone's package) with <code>run:</code> steps
+(literal shell). I pin to major version tags like <code>@v4</code> — you get
+patches automatically; for security-critical workflows I'd pin to a full SHA."
+</div>
+
+<div class="answer q">"How often does CI run?"</div>
+<div class="answer">
+"Once per push, not once per commit. A push of five commits fires the workflow
+once, against the tip commit. The <code>paths:</code> filter checks the union of
+files changed across all commits in the push, so if any commit touched a
+matching path the workflow fires. For rapid iteration I'd add a
+<code>concurrency:</code> block that cancels in-flight runs when a newer push
+arrives — saves minutes without losing the latest signal."
+</div>
+
+<div class="answer q">"How do you handle CI for multiple sub-projects in one repo?"</div>
+<div class="answer">
+"GitHub only discovers workflows in <code>.github/workflows/</code> at the repo
+root — it doesn't scan subdirectories. For a monorepo with multiple independent
+sub-projects (MatchScout, P10 platform, etc.), the standard pattern is
+<strong>one workflow file per sub-project at the root, each with a tight
+<code>paths:</code> filter</strong>. A push touching MatchScout only fires
+MatchScout's workflow. When CI shapes are similar, I'd consolidate via reusable
+workflows (<code>workflow_call</code>) — define the generic Python-smoke
+workflow once, call it from thin per-project wrappers. For now I have one
+workflow because I have one CI'd project."
+</div>
+
+<div class="answer q">"What does it cost?"</div>
+<div class="answer">
+"Free for public repos. Private repos get 2,000 Linux runner minutes/month on
+the free tier; macOS minutes cost 10× and Windows 2×. A 30-second smoke test
+barely registers. For commercial-scale CI you'd add caching
+(<code>actions/cache</code>) and a concurrency block to avoid wasting minutes on
+obsolete in-flight runs."
+</div>
+
+<div class="answer q">"What about secrets / API keys?"</div>
+<div class="answer">
+"Set at the repo level — Settings → Secrets and variables → Actions — and
+accessed in YAML as <code>${{ secrets.NAME }}</code>. The MatchScout smoke test
+deliberately needs none, because the test runs the no-LLM path only. That was a
+design choice — keeping CI free of API-key dependencies means anyone can fork
+and run CI without setting up secrets, and there's no risk of a leaked token in
+a workflow log."
+</div>
+
+<div class="warn">
+<div class="warn-title">⚠ What NOT to say</div>
+<ul>
+  <li><strong>Don't claim you have multi-environment deploy pipelines.</strong> The
+  MatchScout CI is a smoke gate, not a deployment workflow. If asked about deploy:
+  "deployment is out of scope for the PoC — it'd be added in Phase 5+ alongside
+  observability." Honest scope is a senior signal.</li>
+  <li><strong>Don't overclaim security posture.</strong> You're pinning to
+  <code>@v4</code> (a moving major-version tag), not full SHAs. That's a deliberate
+  tradeoff for a small project — call it out as a tradeoff, not as best practice.</li>
+  <li><strong>Don't say "GitHub Actions is configured in the repo settings."</strong>
+  It's configured by the YAML file. Repo settings are for secrets and access
+  control — the workflow logic itself lives in <code>.github/workflows/</code>.</li>
+  <li><strong>Don't conflate CI minutes with API cost.</strong> A pytest run on a
+  GitHub runner is free up to the quota; it has nothing to do with the LLM API
+  spend on MatchScout's actual recommendations (~$0.03/gig Arm 2).</li>
+</ul>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="resume">Resume bullet + LinkedIn snippet</h2>
+
+<div class="snippet">
+  <div class="snippet-label">Resume bullet — P7 / Onemyle entry</div>
+  <strong>MatchScout — AI recommender for Onemyle creator marketplace (Investor & Pro Bono Product/AI Lead).</strong>
+  Built a gig-driven two-stage recommender (rules + sentence-transformer cosine) with an LLM re-ranker on top, plus a 10% no-LLM control arm to causally measure LLM lift on acceptance rate, top-1 selection, and gig success rate. Versioned prompt templates with prompt-version-segmented outcome metrics enable empirical prompt iteration. V2 roadmap (designed + benchmarked): (1) memory layer (Zep / Mem0 / Anthropic Memory tool / Letta benchmark) compresses raw history into compact priors; (2) Agent SDK rebuild of Stage 3 with subagents (history / reasoner / inline fact-checker / Reflexion critic). Stack: Python, LangGraph, Claude Agent SDK, Anthropic Claude, sentence-transformers, SQLite, Streamlit, scipy chi-squared. LangSmith tracing + LangFuse dashboards. PoC validated; productionization pending Onemyle roadmap.
+</div>
+
+<div class="snippet">
+  <div class="snippet-label">LinkedIn / cold-outreach one-liner</div>
+  "Building MatchScout — an AI recommender for B2B creator marketplaces. Two-stage retrieval + LLM re-ranker with a 10% no-LLM control arm to causally measure LLM lift. V2 in design: memory layer (Zep/Mem0/Anthropic Memory tool/Letta benchmark) + Agent SDK subagent rebuild of Stage 3 (inline fact-checker catches hallucinations before they reach users). PoC at Onemyle (Pro Bono Product/AI Lead + investor)."
+</div>
+
+<footer>
+  MatchScout — Interview Pitch Cheat Sheet · By Rajesh Ramani · Onemyle Investor & Pro Bono Product/AI Lead
+</footer>
+
+</body>
+</html>

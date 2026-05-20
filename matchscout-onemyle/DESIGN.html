@@ -88,11 +88,11 @@
 
 <h2 id="overview">What MatchScout Does</h2>
 
-<p><strong>MatchScout</strong> is an AI-powered match-quality predictor for Onemyle's two-sided marketplace. Given a creator and a business, it predicts whether they're likely to have a successful collaboration — outputting a probability score, reasoning citing specific signals, risk factors, and a recommended action.</p>
+<p><strong>MatchScout</strong> is an AI-powered creator recommender for Onemyle's two-sided marketplace. When a business posts a gig, MatchScout surfaces the top 3 creators most likely to deliver a successful collaboration — with reasoning grounded in either their past gig history or their profile descriptions. A holdout control arm (no-LLM baseline) lets us causally measure the LLM's lift on business outcomes.</p>
 
 <h3>One-line description</h3>
 <blockquote>
-"For Onemyle's marketplace operations team, MatchScout is an AI early-warning system that scores creator-business match quality before introduction, so we can recommend better matches, flag risky introductions, and reduce double-sided churn."
+"For Onemyle's marketplace operations team, MatchScout is an AI assistant that recommends the top 3 creators for every newly posted gig — reasoning over each candidate's past performance or profile to maximize acceptance rate and gig success rate, measured against a no-LLM control arm."
 </blockquote>
 
 <h3>Status</h3>
@@ -100,13 +100,15 @@
 <table>
   <thead><tr><th>Item</th><th>Status</th></tr></thead>
   <tbody>
-    <tr><td>Engineering build</td><td>In active development (Week 0 of 4)</td></tr>
-    <tr><td>Data</td><td>Synthetic only (Faker-generated)</td></tr>
+    <tr><td>Engineering build</td><td>In active development</td></tr>
+    <tr><td>Architecture</td><td>Gig-driven recommender, 3 stages × 3 eval arms</td></tr>
+    <tr><td>Data</td><td>Synthetic — Faker for structured fields, Claude for profile descriptions</td></tr>
     <tr><td>Production deployment</td><td>Pending Onemyle roadmap prioritization</td></tr>
     <tr><td>Owner</td><td>Rajesh Ramani (Investor & pro bono Product/AI Lead at Onemyle)</td></tr>
     <tr><td>Repository</td><td>github.com/rrvenkatrama/agentic_ai_projects (matchscout-onemyle)</td></tr>
   </tbody>
 </table>
+
 
 <!-- ====================================================================== -->
 <div class="part">2. Problem Statement</div>
@@ -137,116 +139,139 @@
 <h3>In Scope</h3>
 
 <ul>
-  <li>Synthetic marketplace data (creators + businesses + historical matches)</li>
-  <li>3-stage cascade pipeline (rules filter → vector similarity → LLM agent)</li>
-  <li>LangGraph agent with structured output (probability, reasoning, risk_flags, recommendation)</li>
-  <li>Multi-layer eval framework (Ragas + DeepEval + Promptfoo + regression suite)</li>
-  <li>LangSmith tracing + LangFuse self-hosted dashboard</li>
-  <li>Cost-per-prediction tracking</li>
+  <li>Synthetic marketplace data: creators + businesses (CSV catalog) + past gigs + open gigs + recommendations (SQLite)</li>
+  <li>Profile descriptions (Instagram-bio style free text) stored on each creator and business as a permanent field — synthesized via Claude one-time for PoC (stands in for what users write at signup)</li>
+  <li>Gig-driven pipeline triggered by <code>python recommend_creators.py --gig-id GIG_ID</code> (PoC stand-in for the "Recommend Creators" button in a future UI)</li>
+  <li>Stage 1 hard filter (3 rules): location · budget · content type overlap</li>
+  <li>Stage 2 vector cosine ranker over (niche_tags + profile_description + primary_category + secondary_categories + primary_subcategories) → ranked list X</li>
+  <li>Two-arm A/B assignment per gig: <strong>Arm 1</strong> no-LLM control (10% random, top 3 by cosine), <strong>Arm 2</strong> LLM (90%, top 10 → LLM picks 3 with reasoning)</li>
+  <li>LangGraph state machine for Arm 2 with a single versioned prompt template (<code>prompts/arm2_v1.txt</code>); <code>prompt_version</code> stamped on each recommendation</li>
+  <li>Outcome eval — acceptance rate, top-1 selection rate, gig success rate, per arm and per prompt version, with chi-squared significance</li>
+  <li>Streamlit dashboard — two-arm comparison, with drill-down to LangSmith traces</li>
+  <li>Simplified dev-time remediation toolkit — Ragas / DeepEval / Promptfoo / LangSmith / LangFuse, one job each (NOT a CI gate)</li>
+  <li>CI = schema smoke test only (pytest, ~2 dummy gigs through pipeline, asserts Pydantic output validates)</li>
+  <li>Per-recommendation cost tracking ($0 for Arm 1; ~$0.30 for Arm 2)</li>
+  <li>Reasoning is logged to SQLite for post-hoc analysis but NOT surfaced to the business — the business sees only the 3 creator picks</li>
   <li>Full PM artifact set (PRD, ICP, eval plan, GTM brief, risk register)</li>
-  <li>CLI / function-call interface (no web UI)</li>
 </ul>
 
 <h3>Out of Scope (V2+ territory)</h3>
 
 <ul>
-  <li>FastAPI service wrapper (V2)</li>
-  <li>Pinecone / managed vector DB (V2)</li>
-  <li>Multi-cloud LLM routing (V2)</li>
-  <li>Reliability patterns: circuit breaker, fallback (V2)</li>
+  <li>Web UI (the "Recommend Creators" button + creator display) — V2; replaced by CLI entry point in V1</li>
+  <li>Pre-deploy synthetic golden set + threshold-based CI quality gates — explicitly avoided (synthetic eval doesn't predict production outcomes)</li>
+  <li>FastAPI service wrapper (V2 / maps to P10)</li>
+  <li>Pinecone / managed vector DB (V2 / P10)</li>
+  <li>Multi-cloud LLM routing (V2 / P10)</li>
+  <li>Reliability patterns: circuit breaker, fallback (V2 / P10)</li>
+  <li>Suggested-offer generation and outreach DM drafting — V2 add-on, separate workflow</li>
+  <li>Position-bias counter (randomizing display order of top 3) — V2 enhancement</li>
   <li>Real Onemyle data integration (V2)</li>
-  <li>Production deployment (V3)</li>
-  <li>Web UI / dashboard for marketplace ops (V3)</li>
-  <li>Real-time triggering on platform events (V3)</li>
-  <li>Cascade pre-computation + caching (V3)</li>
+  <li>Production deployment, real users (V3)</li>
 </ul>
 
 <!-- ====================================================================== -->
-<div class="part">4. Architecture (3-Stage Cascade)</div>
+<div class="part">4. Architecture</div>
 
-<h2 id="architecture">3-Stage Real-Time Cascade + Offline Audit (Revised 2026-05-10)</h2>
+<h2 id="architecture">Gig-Driven Recommender — 3 Stages × 3 Eval Arms</h2>
 
-<p>Industry-standard architecture for marketplace AI. The real-time pipeline keeps the path fast and lean; heavier quality auditing runs OFFLINE on production logs (Phase 4 — see eval section).</p>
+<p>A gig posted by a business is the trigger. The pipeline narrows from the full creator catalog to 3 recommended creators, with a treatment-arm split that lets us causally measure the LLM's lift over a no-LLM control.</p>
 
 <div class="info">
-  <div class="info-title">Architectural decision — runtime gate moved to offline batch (2026-05-10)</div>
-  Original design had a Stage 4 runtime quality gate that ran on every prediction. We moved heavier quality checks (faithfulness, forbidden-term, self-consistency) to an OFFLINE batch audit (Phase 4) that runs on production prediction logs nightly. Real-time pipeline keeps only Pydantic schema validation (free, prevents broken outputs).
-  <br><br>
-  Why: faster real-time response, lower per-prediction cost, simpler real-time pipeline. Trade-off: bad predictions can reach users until next batch run; we mitigate via dashboard alerts + remediation workflow. Standard pattern for marketplace AI (Airbnb, DoorDash, Uber all do this).
+  <div class="info-title">Why the system orients around the Gig</div>
+  Real marketplaces work in <strong>gig</strong> terms: a business posts a job, the platform recommends a shortlist, the business picks one, the gig succeeds or fails. The Gig is the unit of work the user actually cares about — so the system orients around it. Recommendations become first-class entities tied to a gig, and outcomes flow back into eval automatically.
 </div>
 
 <div class="ascii-diagram">
 ┌──────────────────────────────────────────────────────────────────┐
-│                     ALL POSSIBLE PAIRS                            │
-│       400 creators × 300 businesses = 120,000 possible pairs      │
+│         NEW GIG POSTED (by a business, has its own budget/        │
+│         location/content_needs/timeline — may differ from         │
+│         business defaults)                                         │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  STAGE 1 — HARD FILTERS (rules-based)                             │
-│  • Same OR adjacent category                                       │
-│  • Content type overlap (creator's outputs ∩ business's needs)    │
-│  • Location compatible (same metro OR remote-OK)                  │
-│  • Budget overlap (creator's range ∩ business's range)            │
-│  • Both accounts active in last 30 days                            │
-│                                                                     │
-│  Cost:    ~$0 (no LLM)        Latency: ~10ms (DB query)            │
-│  Reduces: 120K → ~5-10K compatible pairs                          │
+│  TREATMENT ARM ASSIGNMENT (random)                                 │
+│  • 10% of gigs → Arm 1 (No-LLM control)                            │
+│  • 90% of gigs → Arm 2 (LLM)                                       │
+│  • Recorded on the gig row for later eval                          │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  STAGE 2 — VECTOR SIMILARITY RANKING                              │
-│  • Embed creator profile (sub-categories + niche tags +           │
-│    content types as text)                                          │
-│  • Embed business brief (needs + niche tags)                      │
-│  • Cosine similarity → rank top 20-30 candidates per query        │
-│  • Uses sentence-transformers (all-MiniLM-L6-v2) locally          │
-│                                                                     │
-│  Cost:    ~$0 (embeddings cached)   Latency: ~50ms                │
-│  Reduces: ~5-10K → top 20 candidates                              │
+│  STAGE 1 — HARD FILTERS                                            │
+│  Inputs: gig — gig.location, gig.budget, gig.content_needs         │
+│  Rules:                                                              │
+│   • Location compatible (gig.location == creator.location           │
+│     OR creator.remote_friendly AND gig.remote_acceptable)           │
+│   • Budget overlap (creator.budget_range ∩ gig.budget_range)        │
+│   • Content type overlap                                            │
+│     (creator.content_types ∩ gig.content_needs non-empty)           │
+│                                                                      │
+│  Cost: $0    Latency: ~10ms    400 creators → N candidates          │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  STAGE 3 — LLM AGENT (PREMIUM REASONING)                          │
-│  • LangGraph state machine                                         │
-│  • Claude Sonnet 4.6 (primary) — premium model                    │
-│  • Pydantic schema validation INLINE (~1ms, prevents broken JSON) │
-│  • Analyzes top 10-20 candidates with full context                │
-│  • Outputs: probability + reasoning + risk_flags + action         │
-│                                                                     │
-│  Cost:    ~$0.18 per pair          Latency: ~2 sec per pair       │
-│  Per query (top 20): ~$3.60 + ~10s (sequential)                   │
-│  Per query (parallelized): ~$3.60 + ~3s (with concurrency)        │
+│  STAGE 2 — VECTOR SIMILARITY RANKING                               │
+│  Embedding text per side (one string each):                         │
+│   • niche_tags                                                       │
+│   • profile_description (Instagram-bio style free text)              │
+│   • primary_category + secondary_categories                          │
+│   • primary_subcategories                                            │
+│  Method: sentence-transformers/all-MiniLM-L6-v2 cosine               │
+│  Output: X candidates ranked semantically                            │
+│                                                                      │
+│  Cost: $0    Latency: ~50ms                                          │
 └──────────────────────────────────────────────────────────────────┘
                               │
-                              ▼
-                     Final ranked matches
-                     with full reasoning
+                ┌─────────────┴─────────────┐
+                ▼                           ▼
+        ┌─────────────────┐         ┌────────────────────────┐
+        │ Arm 1 (10%)     │         │ Arm 2 (90%)            │
+        │ No-LLM          │         │ LLM                    │
+        │                 │         │                        │
+        │ Take top 3      │         │ Take top 10 from X.    │
+        │ from X by       │         │ For each, fetch up to  │
+        │ cosine score.   │         │ 10 most recent past    │
+        │ No reasoning.   │         │ gigs. Compute metrics  │
+        │ No LLM call.    │         │ (success count, fail   │
+        │                 │         │ count, followers, avg  │
+        │                 │         │ rating) + per-metric   │
+        │                 │         │ ranks within the 10.   │
+        │                 │         │ LLM ranks top 3 using  │
+        │                 │         │ versioned prompt       │
+        │                 │         │ template. Reasoning    │
+        │                 │         │ logged, not shown to   │
+        │                 │         │ business.              │
+        │ Cost: $0        │         │ Cost: ~$0.30           │
+        │ Latency ~5ms    │         │ Latency ~3s            │
+        └─────────────────┘         └────────────────────────┘
                               │
-                              ├──────► Logged to predictions.csv
-                              │        + LangSmith trace
-                              │
                               ▼
-                     Surfaced to user
-                     IMMEDIATELY
-
-
-─────────────── OFFLINE (separate, batch) ───────────────────────────
-
 ┌──────────────────────────────────────────────────────────────────┐
-│  PHASE 4 — PRODUCTION AUDIT BATCH (nightly or hourly)             │
-│  • Reads prediction logs from last N hours                         │
-│  • Runs heavier quality checks per prediction:                     │
-│       - Ragas faithfulness (was reasoning grounded?)              │
-│       - Forbidden term check (no hallucinated fields?)             │
-│       - Self-consistency (action ↔ probability)                    │
-│       - Confidence threshold violations                            │
-│  • Aggregates results to dashboard                                 │
-│  • Alerts on threshold breaches (e.g., "10% had faithfulness<0.7")│
-│  • Surfaces flagged predictions for human review / remediation    │
+│  3 CreatorRecommendation rows written to SQLite per gig            │
+│  (gig_id, creator_id, rank, source_arm, prompt_version,            │
+│   reasoning, strengths, risks, key_signals)                        │
 └──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                  Business picks one creator
+                              │
+                              ▼
+                  gig.assigned_creator_id set,
+                  status → in_progress → completed/failed
+                              │
+                              ▼
+        ───── Nightly batch reads completed gigs ─────
+        ┌──────────────────────────────────────────────┐
+        │  Streamlit dashboard updates per arm:        │
+        │   - Acceptance rate (picked from top 3?)     │
+        │   - Top-1 selection rate                     │
+        │   - Top-3 hit rate                           │
+        │   - Gig success rate when accepted           │
+        │   - Chi-squared significance between arms    │
+        └──────────────────────────────────────────────┘
 </div>
 
 <h3>Why this architecture (vs alternatives)</h3>
@@ -269,158 +294,177 @@
 
 <h3>filter.py — Stage 1 (Hard Filters)</h3>
 
-<pre><code>def stage1_filter(creator, business) -> bool:
-    """Pure function — returns True if pair is compatible enough to consider."""
-
-    # Category compatibility (with adjacency map)
-    if creator.primary_category != business.primary_category:
-        if creator.primary_category not in ADJACENT_MAP[business.primary_category]:
-            if business.primary_category not in (creator.secondary_categories or []):
-                return False
-
-    # Content type overlap
-    if not set(creator.content_types) & set(business.content_needs):
-        return False
+<pre><code>def stage1_filter(creator, gig) -> bool:
+    """Pure function — returns True if creator is structurally compatible with the gig."""
 
     # Location compatibility
-    if not creator.remote_friendly and creator.location != business.location:
-        return False
+    if creator.location != gig.location_required:
+        if not (creator.remote_friendly and gig.remote_acceptable):
+            return False
 
     # Budget overlap
-    if creator.budget_range[1] < business.budget_range[0]: return False
-    if creator.budget_range[0] > business.budget_range[1]: return False
+    if creator.budget_range_per_gig[1] < gig.budget_range[0]: return False
+    if creator.budget_range_per_gig[0] > gig.budget_range[1]: return False
 
-    # Activity check
-    if not (creator.active_30d and business.active_30d): return False
+    # Content type overlap (at least one shared)
+    if not set(creator.content_types) & set(gig.content_needs):
+        return False
 
     return True</code></pre>
 
-<p>No LLM calls. Pure rules. Runs in microseconds per pair.</p>
+<p>Three rules — location, budget, content type. No category gating (handled in Stage 2 via embedding). No LLM. Runs in microseconds per pair.</p>
 
 <h3>ranker.py — Stage 2 (Vector Similarity)</h3>
 
 <div class="info">
   <div class="info-title">Why we use the small sentence-transformer model</div>
-  Stage 2 uses <code>all-MiniLM-L6-v2</code> (22M params, 384-dim, ~80MB, free, local) — not the larger <code>all-mpnet-base-v2</code> (110M params, 768-dim). For Stage 2's job (narrowing 5K candidates to 20), the small model is fast enough and good enough. Stage 3's LLM does the deep reasoning afterwards. If we were using vector similarity as the FINAL ranker (no LLM stage after), we'd upgrade. Eval (Phase 3) will confirm whether MiniLM is missing candidates the LLM would have ranked highly — if yes, we'd swap to mpnet.
+  Stage 2 uses <code>all-MiniLM-L6-v2</code> (22M params, 384-dim, ~80MB, free, local) — not the larger <code>all-mpnet-base-v2</code>. For Stage 2's job (narrowing N candidates to 10), the small model is fast enough and good enough. Stage 3's LLM does the deep reasoning over historical metrics afterwards.
 </div>
 
 <pre><code>from sentence_transformers import SentenceTransformer
 
 model = SentenceTransformer("all-MiniLM-L6-v2")  # local, free, fast
 
-def creator_text(creator):
-    """Textual representation for embedding."""
-    return f"{creator.primary_category} {' '.join(creator.subcategories)} " \
-           f"{' '.join(creator.niche_tags)} {' '.join(creator.content_types)}"
+def embedding_text(entity):
+    """Textual representation for embedding — same shape for creator + business."""
+    return " ".join([
+        " ".join(entity.niche_tags),
+        entity.profile_description,
+        entity.primary_category,
+        " ".join(entity.secondary_categories),
+        " ".join(entity.primary_subcategories),
+    ])
 
-def business_text(business):
-    return f"{business.primary_category} {' '.join(business.subcategories)} " \
-           f"{' '.join(business.niche_tags)} {' '.join(business.content_needs)}"
-
-def stage2_rank(business, candidates, top_k=20):
-    """Rank filtered candidates by cosine similarity to business."""
-    business_vec = model.encode(business_text(business))
-    candidate_vecs = model.encode([creator_text(c) for c in candidates])
+def stage2_rank(gig, candidates, top_k=10):
+    """Rank Stage 1 candidates by cosine similarity to the gig-posting business."""
+    business = load_business(gig.business_id)
+    business_vec = model.encode(embedding_text(business))
+    candidate_vecs = model.encode([embedding_text(c) for c in candidates])
 
     similarities = cosine_similarity([business_vec], candidate_vecs)[0]
     ranked = sorted(zip(candidates, similarities), key=lambda x: -x[1])
     return ranked[:top_k]</code></pre>
 
-<p>Embeddings can be pre-computed and cached. Uses sentence-transformers (free, local, no API costs).</p>
+<p>Embeddings can be pre-computed and cached. Same embedding function on both sides of the marketplace — symmetric representation.</p>
 
-<h3>agent.py — Stage 3 (LangGraph LLM Agent + Inline Schema Validation)</h3>
+<h3>agent.py — Stage 3 (LangGraph LLM Agent)</h3>
 
 <div class="info">
-  <div class="info-title">Stage 3 includes Pydantic schema validation inline</div>
-  Schema validation costs ~1ms and prevents downstream code from crashing on malformed JSON. This is the ONLY runtime quality check. All other checks (faithfulness, forbidden terms, consistency) are deferred to the offline Phase 4 batch audit.
+  <div class="info-title">Prompt is a versioned template file, not inline code</div>
+  The prompt template lives in <code>prompts/arm2_v1.txt</code>. <code>agent.py</code> loads it by version, formats in runtime data, and calls the LLM. Each recommendation row records its <code>prompt_version</code>, so the outcome dashboard can segment metrics by prompt version — this is how prompt iteration is empirically driven, not vibe-driven.
 </div>
 
 <pre><code>from langgraph.graph import StateGraph
 from anthropic import Anthropic
-from pydantic import BaseModel
+from pathlib import Path
 
-class MatchPrediction(BaseModel):
-    success_probability: float       # 0.0 - 1.0
-    reasoning: str                    # explanation citing specific signals
-    risk_factors: list[str]           # e.g., ["budget_mismatch", "first_time_business"]
-    recommended_action: str           # "introduce" | "introduce_with_clarification" |
-                                      # "hold_pending_review" | "do_not_introduce"
+PROMPT_DIR = Path(__file__).parent.parent / "prompts"
+PROMPT_VERSION = "arm2_v1"   # bumped when a new prompt is deployed
 
-# LangGraph state machine
+def load_prompt(version: str) -> str:
+    return (PROMPT_DIR / f"{version}.txt").read_text()
+
+# LangGraph state for Arm 2
 class AgentState(TypedDict):
-    creator: dict
-    business: dict
-    compatibility_signals: dict       # computed signals
-    prediction: MatchPrediction
+    gig: dict
+    candidates: list           # top 10 from Stage 2
+    candidate_metrics: list    # per-creator: success/fail/followers/rating + ranks
+    candidate_recent_gigs: dict  # creator_id -> up to 10 recent gigs
+    recommendations: list      # top 3 with reasoning
 
-def load_profiles(state): ...
-def compute_signals(state): ...       # location overlap, budget alignment, etc.
-def call_llm(state): ...              # Claude reasoning with structured output
-def validate_output(state): ...       # ensure prediction matches schema
+def load_metrics(state): ...        # compute per-creator success/fail/rating + per-metric ranks
+def call_llm(state):                # apply versioned prompt + Claude
+    prompt = load_prompt(PROMPT_VERSION).format(
+        gig_brief=format_gig(state["gig"]),
+        candidates_table=format_table(state["candidate_metrics"]),
+        candidates_recent_gigs=format_gigs(state["candidate_recent_gigs"]),
+        output_schema=schema_json,
+    )
+    ...
+def validate_output(state): ...     # Pydantic schema check
 
 graph = StateGraph(AgentState)
-graph.add_node("load", load_profiles)
-graph.add_node("signals", compute_signals)
+graph.add_node("metrics", load_metrics)
 graph.add_node("predict", call_llm)
 graph.add_node("validate", validate_output)
-graph.add_edge("load", "signals")
-graph.add_edge("signals", "predict")
+graph.add_edge("metrics", "predict")
 graph.add_edge("predict", "validate")
-graph.set_entry_point("load")
+graph.set_entry_point("metrics")
 graph.set_finish_point("validate")</code></pre>
 
-<p>Structured output enforced via Pydantic. Multi-step state machine allows targeted retries (only re-run "predict" if validation fails, not re-run "load").</p>
+<p>Structured output enforced via Pydantic. The Arm 1 (no-LLM) path skips this entire module — the pipeline writes 3 cosine-ranked rows directly.</p>
 
 <h3>pipeline.py — Orchestrator</h3>
 
-<pre><code>def find_matches_for_business(business_id, top_k=5):
-    """Run the full cascade for a single business query."""
-    business = load_business(business_id)
+<pre><code>import random
+from matchscout import db, filter, ranker, agent
+
+CONTROL_FRACTION = 0.10   # 10% of gigs go to no-LLM control
+
+def recommend_creators(gig_id: str):
+    """Entry point — invoked by `python recommend_creators.py --gig-id gig_001`.
+    Runs the full pipeline and writes 3 CreatorRecommendation rows to SQLite."""
+    gig = db.get_gig(gig_id)
     all_creators = load_all_creators()
 
-    # Stage 1
-    candidates = [c for c in all_creators if stage1_filter(c, business)]
+    # Stage 1 — hard filter
+    candidates = [c for c in all_creators if filter.stage1_filter(c, gig)]
 
-    # Stage 2
-    ranked = stage2_rank(business, candidates, top_k=20)
+    # Stage 2 — vector rank
+    ranked = ranker.stage2_rank(gig, candidates, top_k=10)
 
-    # Stage 3 (parallelized for latency)
-    predictions = await asyncio.gather(*[
-        agent.invoke({"creator": c, "business": business})
-        for c, _similarity in ranked
-    ])
+    # Treatment arm assignment
+    arm = "no_llm" if random.random() < CONTROL_FRACTION else "llm"
+    db.update_gig(gig_id, treatment_arm=arm)
 
-    # Sort by predicted success probability
-    final = sorted(predictions, key=lambda p: -p.success_probability)
-    return final[:top_k]</code></pre>
+    if arm == "no_llm":
+        # Arm 1: top 3 by cosine, no LLM
+        top_3 = [c for c, _sim in ranked[:3]]
+        recommendations = [
+            db.CreatorRecommendation(
+                gig_id=gig_id, creator_id=c.id, rank=i+1,
+                source_arm="no_llm", prompt_version=None,
+                reasoning=None,
+            )
+            for i, c in enumerate(top_3)
+        ]
+    else:
+        # Arm 2: top 10 → LLM picks top 3 using versioned prompt
+        top_10 = [c for c, _sim in ranked[:10]]
+        recommendations = agent.invoke(gig, top_10)
+
+    db.write_recommendations(recommendations)
+    return recommendations</code></pre>
 
 <!-- ====================================================================== -->
 <div class="part">6. Data Model</div>
 
 <h2 id="data-model">Entity Schemas</h2>
 
-<h3>Creator</h3>
+<h3>Creator (CSV catalog — intrinsic fields only, no time-varying aggregates)</h3>
 
 <pre><code>{
   "id": "creator_001",
   "name": "Maya Chen",
   "primary_category": "food_beverage",
   "primary_subcategories": ["fine_dining", "specialty_foods"],
-  "secondary_categories": ["travel"],
+  "secondary_categories": ["travel_hospitality"],
   "content_types": ["reels", "photography"],
   "location": "Boston, MA",
-  "remote_friendly": True,
+  "remote_friendly": true,
   "follower_count": 42000,
   "engagement_rate": 0.038,
-  "past_gigs_completed": 23,
-  "avg_rating": 4.7,
   "budget_range_per_gig": [400, 1200],
   "niche_tags": ["fine_dining", "natural_lighting", "magazine_quality"],
-  "response_time_hours_avg": 3.2,
-  "active_in_last_30_days": True
+  "active_in_last_30_days": true,
+  "profile_description": "Reel creator 📍 Boston. Fine dining specialist.
+                          DM For Collaboration. Food Review / PR.
+                          Magazine-quality natural light photography."
 }</code></pre>
 
-<h3>Business</h3>
+<p><strong>Derived fields removed from this schema</strong> (computed from the gigs table when needed): past gigs completed, avg rating, response time average. Keeping them on Creator would denormalize the data and create a sync burden.</p>
+
+<h3>Business (CSV catalog — intrinsic fields only, no time-varying aggregates)</h3>
 
 <pre><code>{
   "id": "biz_001",
@@ -430,51 +474,83 @@ graph.set_finish_point("validate")</code></pre>
   "secondary_categories": [],
   "content_needs": ["reels", "photography"],
   "location": "Boston, MA",
-  "remote_acceptable": False,
+  "remote_acceptable": false,
   "business_size": "small",
-  "past_creators_hired": 8,
-  "avg_creator_rating": 4.5,
   "budget_range_per_gig": [500, 1000],
   "niche_tags": ["fine_dining", "italian", "wine_pairing"],
-  "current_gigs_open": 2,
-  "active_in_last_30_days": True,
-  "preferred_creator_size": "mid"
+  "active_in_last_30_days": true,
+  "preferred_creator_size": "mid",
+  "profile_description": "Authentic Northern Italian fine dining in
+                          Boston's North End. House-made pasta, curated
+                          wine list, intimate setting. Family-owned since
+                          2014. Open for collabs with food creators."
 }</code></pre>
 
-<h3>Historical Match (for golden set)</h3>
+<p><strong>Derived fields removed</strong> (computed from gigs table when needed): past creators hired, avg creator rating, current gigs open.</p>
+
+<h3>Gig (SQLite — newly posted job)</h3>
 
 <pre><code>{
-  "id": "match_001",
-  "creator_id": "creator_001",
+  "id": "gig_001",
   "business_id": "biz_001",
-  "introduced_at": "2026-04-01",
-  "outcome": "successful",          # successful | failed | no_response
-  "outcome_reason": "completed_3_gigs_excellent_reviews",
-  "creator_rating": 5,
-  "business_rating": 5,
-  "gig_count": 3,
-  "total_paid": 2400
+  "posted_at": "2026-05-12T10:00:00Z",
+  "status": "open",                     # open | in_review | in_progress | completed | failed | cancelled
+  "category": "food_beverage",
+  "subcategories": ["fine_dining"],
+  "content_needs": ["reels", "photography"],
+  "budget_range": [600, 900],           # gig may override business defaults
+  "timeline_days": 14,
+  "location_required": "Boston, MA",    # or "any" for nationwide
+  "remote_acceptable": false,
+  "niche_tags": ["fine_dining", "italian", "wine_pairing", "fall_menu"],
+  "treatment_arm": "llm",              # "no_llm" | "llm"
+  "assigned_creator_id": null,          # set when business picks
+  "outcome": null,                      # "success" | "failed" | "no_response"
+  "business_rating": null,              # 1-5, set after completion
+  "creator_rating": null,
+  "completed_at": null
 }</code></pre>
 
-<h3>Prediction Output (MatchScout's output)</h3>
+<h3>CreatorRecommendation (SQLite — 3 rows per gig)</h3>
 
 <pre><code>{
-  "creator_id": "creator_001",
-  "business_id": "biz_001",
-  "success_probability": 0.87,
-  "reasoning": "Strong location and category fit. Creator's fine dining
-                specialty matches Tavola's positioning. Budget ranges overlap
-                ($500-1000 ∩ $400-1200). Creator has 23 past gigs with avg
-                rating 4.7, suggesting reliability. Risk: creator typically
-                works with mid-tier restaurants, Tavola is upscale.",
-  "risk_factors": ["budget_alignment_borderline", "creator_tier_match"],
-  "recommended_action": "introduce_with_brief_alignment",
-  "confidence": 0.82,
-  "predicted_at": "2026-05-09T14:30:00Z",
-  "model_version": "claude-sonnet-4-6",
-  "prompt_version": "v1.2",
-  "cost_usd": 0.18
+  "id": "rec_001",
+  "gig_id": "gig_001",
+  "creator_id": "creator_042",
+  "rank": 1,                                  # 1, 2, or 3
+  "source_arm": "llm",                        # "no_llm" | "llm"
+  "prompt_version": "arm2_v1",                # null when source_arm=no_llm
+  "reasoning": "Creator has 8 successful gigs and only 1 failed gig (success rank 1
+                of 10). Avg rating 4.7 is among the strongest in the candidate set.
+                Follower count is moderate (100K) but balanced performance across
+                reliability and quality outweighs reach-only candidates.",
+  "strengths": [
+    "8/10 most recent gigs successful in relevant category",
+    "Avg rating 4.7 — top of the candidate set",
+    "Consistent delivery cadence across past gigs"
+  ],
+  "risks": [
+    "Recent gig backlog suggests booking density — confirm availability"
+  ],
+  "key_signals": [
+    "successful_gigs=8, failed_gigs=1",
+    "avg_rating=4.7",
+    "follower_count=100000",
+    "success_rank=1, ratings_rank=4 within the 10 candidates"
+  ],
+  "generated_at": "2026-05-12T10:00:08Z",
+  "cost_usd": 0.10
 }</code></pre>
+
+<p>Arm 1 rows have <code>source_arm="no_llm"</code>, <code>prompt_version=null</code>, and most narrative fields (<code>reasoning</code>, <code>strengths</code>, <code>risks</code>) are null. Schema is uniform so dashboard aggregation can scan both arms in one query.</p>
+
+<p><strong>Important:</strong> the <code>reasoning</code>, <code>strengths</code>, <code>risks</code> fields are stored for post-hoc analysis and prompt iteration — they are NOT surfaced to the business in the UI. The business sees only the 3 creator names and basic profile info.</p>
+
+<div class="info">
+  <div class="info-title">One unified <code>gigs</code> table — no separate <code>past_gigs</code></div>
+  Historical and active gigs live in the same SQLite table, distinguished by the <code>status</code> field. "Past gigs for creator X" is <code>SELECT * FROM gigs WHERE assigned_creator_id = X AND status = 'completed' ORDER BY completed_at DESC LIMIT 10</code>. This avoids duplicating schema and keeps a single source of truth for the gig lifecycle. The seed data in <code>matches.csv</code> is loaded into this same table with <code>status='completed'</code> (or <code>'failed'</code> / <code>'no_response'</code> based on outcome).
+</div>
+
 
 <!-- ====================================================================== -->
 <div class="part">7. Category Schema</div>
@@ -560,16 +636,17 @@ graph.set_finish_point("validate")</code></pre>
              │
              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ OUTPUT: top 5 ranked predictions with reasoning                   │
-│ Each: {creator_id, score, reasoning, risk_factors, action}        │
+│ OUTPUT: 3 ranked CreatorRecommendation rows per gig               │
+│ Each: {creator_id, rank, source_arm, prompt_version, reasoning,   │
+│        strengths, risks, key_signals}                              │
 └──────────────────────────────────────────────────────────────────┘
              │
              ▼
 ┌──────────────────────────┐
 │  Logged to:              │
+│  • SQLite recommendations│
 │  • LangSmith (traces)    │
 │  • LangFuse (cost/lat.)  │
-│  • Local CSV (audit)     │
 └──────────────────────────┘
 </div>
 
@@ -583,14 +660,16 @@ graph.set_finish_point("validate")</code></pre>
 <table>
   <thead><tr><th>Component</th><th>Trigger</th><th>Frequency</th></tr></thead>
   <tbody>
-    <tr><td>Data generation</td><td>Manual run (one-time setup)</td><td>Once during dev; rarely after</td></tr>
-    <tr><td>Embedding pre-computation</td><td>Manual run (one-time setup)</td><td>Once after data generation; rerun if data changes</td></tr>
-    <tr><td>Stage 1 filter</td><td>On every prediction request</td><td>Per query</td></tr>
-    <tr><td>Stage 2 ranker</td><td>On every prediction request</td><td>Per query</td></tr>
-    <tr><td>Stage 3 agent</td><td>On every prediction request (top 20 candidates)</td><td>~20 LLM calls per query</td></tr>
-    <tr><td>Eval suite</td><td>Manually via <code>pytest</code> OR on every git push</td><td>Per code change</td></tr>
+    <tr><td>Data generation (catalog + profiles)</td><td>Manual run (one-time setup)</td><td>Once during dev; rarely after</td></tr>
+    <tr><td>Embedding pre-computation</td><td>Manual run (one-time setup)</td><td>Once after data generation; rerun if profile_description changes</td></tr>
+    <tr><td>Gig creation</td><td>Manual (for PoC); user-triggered in V2</td><td>Per gig</td></tr>
+    <tr><td>Stage 1 filter</td><td>On every gig recommendation request</td><td>Per gig</td></tr>
+    <tr><td>Stage 2 ranker</td><td>On every gig recommendation request</td><td>Per gig</td></tr>
+    <tr><td>Stage 3 LLM (Arm 2 only)</td><td>On 90% of gig recommendation requests</td><td>1 LLM call per gig (LLM ranks 10 candidates → top 3 in one call)</td></tr>
+    <tr><td>CI smoke test</td><td>On every git push</td><td>Per code change</td></tr>
+    <tr><td>Outcome dashboard batch</td><td>Nightly</td><td>Continuous</td></tr>
     <tr><td>LangSmith logging</td><td>Automatic on every LLM call</td><td>Continuous</td></tr>
-    <tr><td>LangFuse dashboard</td><td>Pull from log data</td><td>Continuous</td></tr>
+    <tr><td>LangFuse dashboard</td><td>Pull from trace data</td><td>Continuous</td></tr>
   </tbody>
 </table>
 
@@ -617,15 +696,12 @@ graph.set_finish_point("validate")</code></pre>
 
 <p>For the PoC, MatchScout is invoked manually:</p>
 
-<pre><code># From CLI
-python -m matchscout.pipeline --business biz_001 --top-k 5
+<pre><code># From CLI (the "Recommend Creators" button, PoC version)
+python recommend_creators.py --gig-id gig_001
 
 # From Python
-from matchscout import predict_matches
-results = predict_matches(business_id="biz_001", top_k=5)
-
-# From eval framework
-python -m eval.run_golden_set    # runs cascade against all golden set entries</code></pre>
+from matchscout.pipeline import recommend_creators
+recommendations = recommend_creators(gig_id="gig_001")</code></pre>
 
 <p>No automated triggering. No web service. CLI / function-call interface only.</p>
 
@@ -684,107 +760,98 @@ python -m eval.run_golden_set    # runs cascade against all golden set entries</
 <h2 id="eval">Multi-Layer Eval</h2>
 
 <div class="info">
-  <div class="info-title">Two distinct eval scopes — don't confuse them</div>
-  <strong>Stage 4 (Runtime Quality Gate)</strong> — runs on EVERY prediction. Decides if THIS specific output is trustworthy enough to surface. Fast checks (~50ms). Uses Pydantic + custom Python + lightweight Ragas.
-  <br><br>
-  <strong>Phase 3 (Offline Eval Framework, this section)</strong> — runs on every code push (CI). Measures aggregate quality across the golden set. Decides if the codebase as a whole is good enough to ship. Slower, more thorough. Uses Ragas (heavy), DeepEval, Promptfoo, regression suite.
-  <br><br>
-  Together: Stage 4 protects users from individual bad predictions; offline eval protects the codebase from systemic regressions. Both required.
+  <div class="info-title">Eval is outcome-based, not pre-deploy threshold-based</div>
+  Every gig produces 3 recommendations and (eventually) an outcome. Outcomes are the eval. There is no synthetic golden set, no CI quality gate, no pre-deploy threshold check. The single dashboard segmenting by <code>treatment_arm</code> and <code>prompt_version</code> is the entire eval surface — and it's all that matters, because the only quality question that matters is "did the LLM beat the no-LLM baseline on real user behavior."
 </div>
 
-<div class="info">
-  <div class="info-title">Eval is broader than prompt engineering</div>
-  Common misconception: "eval = prompt iteration." Wrong. Eval is the measurement layer that informs ALL engineering decisions — model selection (Sonnet vs Opus), architecture changes (cascade vs single LLM), gate strictness, vector model choice, candidate count, etc. Promptfoo is the prompt-A/B-testing slice; the rest of the framework measures quality regardless of what changed.
-</div>
-
-<h3>Golden set</h3>
-
-<p>50 hand-labeled match outcomes. Each entry: creator, business, expected outcome (success/failure), expected reasoning theme.</p>
-
-<h3>Layer 1 — Accuracy (golden set)</h3>
+<h3>The two arms</h3>
 
 <table>
-  <thead><tr><th>Metric</th><th>Target</th><th>Kill threshold</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Arm</th>
+      <th>Assignment</th>
+      <th>How recommendations are produced</th>
+      <th>Cost per gig</th>
+    </tr>
+  </thead>
   <tbody>
-    <tr><td>Precision (% of "good match" predictions that were actually good)</td><td>≥ 75%</td><td>< 55%</td></tr>
-    <tr><td>Recall (% of actually-good matches that we surfaced)</td><td>≥ 65%</td><td>< 45%</td></tr>
-    <tr><td>F1 (harmonic mean)</td><td>≥ 70%</td><td>< 50%</td></tr>
+    <tr>
+      <td><strong>Arm 1 — No-LLM control</strong></td>
+      <td>10% of gigs, random</td>
+      <td>Top 3 by cosine similarity from Stage 2. No reasoning. No LLM call.</td>
+      <td>$0</td>
+    </tr>
+    <tr>
+      <td><strong>Arm 2 — LLM</strong></td>
+      <td>90% of gigs</td>
+      <td>Stage 2's top 10 + each candidate's last-10-gigs history + per-metric ranks → LLM applies versioned prompt template → top 3 with reasoning.</td>
+      <td>~$0.30</td>
+    </tr>
   </tbody>
 </table>
 
-<h3>Layer 2 — Faithfulness (Ragas)</h3>
+<h3>Outcome metrics (per arm, per prompt version)</h3>
 
-<p>Measures: when the agent's reasoning cites a signal, is that signal actually present in the input data?</p>
+<table>
+  <thead><tr><th>Metric</th><th>What it measures</th><th>Computed from</th></tr></thead>
+  <tbody>
+    <tr><td>Acceptance rate</td><td>% of completed gigs where business picked one of the 3 recommended creators</td><td><code>gigs.assigned_creator_id IN recommendations.creator_id</code></td></tr>
+    <tr><td>Top-1 selection rate</td><td>% of accepted gigs where business picked rank #1</td><td><code>gigs.assigned_creator_id = rec[rank=1].creator_id</code></td></tr>
+    <tr><td>Gig success rate (accepted only)</td><td>% of accepted gigs that ended with outcome=success</td><td><code>gigs.outcome = 'success' WHERE accepted</code></td></tr>
+    <tr><td>Composite "good outcome rate"</td><td>acceptance × success</td><td>multiplicative</td></tr>
+    <tr><td>Chi-squared p-value</td><td>Statistical significance of Arm 1 vs Arm 2</td><td><code>scipy.stats.chi2_contingency</code></td></tr>
+  </tbody>
+</table>
 
-<pre><code>from ragas.metrics import faithfulness
+<h3>Expected outcome</h3>
 
-score = faithfulness(
-    answer=prediction.reasoning,
-    context=[creator_data, business_data]
-)
+<p>If the LLM is adding value: <strong>Arm 2 &gt; Arm 1</strong> on composite good-outcome rate. If not, apply the remediation playbook below — and if remediation fails to close the gap, the LLM isn't earning its cost and we should shrink Arm 2.</p>
 
-# Threshold: faithfulness ≥ 0.85
-# Catches hallucinations (agent inventing signals not present in data)</code></pre>
+<h3>Streamlit dashboard</h3>
 
-<h3>Layer 3 — DeepEval assertions</h3>
+<p>A nightly batch reads SQLite, groups completed gigs by <code>(treatment_arm, prompt_version)</code>, computes the metrics above, and renders side-by-side comparison. Inspectable at <code>streamlit run matchscout/dashboard.py</code>.</p>
 
-<pre><code>def test_no_invented_metrics():
-    """Agent shouldn't reference data fields that don't exist."""
-    output = agent.predict(creator_001, biz_001)
-    forbidden_terms = ["instagram_dm", "tiktok_dm", "phone_call",
-                       "whatsapp", "personal_email"]  # we don't track these
-    for term in forbidden_terms:
-        assert term not in output.reasoning
+<pre><code>Arm    Prompt    N    Accept  Top-1  Success  Composite
+─────────────────────────────────────────────────────────
+no_llm   —      24    52%    35%    68%       35%
+llm    arm2_v1 218    73%    56%    80%       58%
 
-def test_recommended_action_valid():
-    """Action must be one of the allowed values."""
-    output = agent.predict(creator_001, biz_001)
-    assert output.recommended_action in [
-        "introduce", "introduce_with_clarification",
-        "hold_pending_review", "do_not_introduce"
-    ]
+Chi-squared p-value (no_llm vs llm/arm2_v1):  0.008 ✓</code></pre>
 
-def test_probability_in_range():
-    """Probability must be in [0, 1]."""
-    output = agent.predict(creator_001, biz_001)
-    assert 0.0 <= output.success_probability <= 1.0</code></pre>
+<h3>Prompt iteration loop</h3>
 
-<h3>Layer 4 — Promptfoo A/B testing</h3>
+<p>The prompt is the primary tuning surface. Iteration is empirically driven:</p>
 
-<p>3 prompt variants tested side-by-side on the golden set:</p>
+<pre><code>1. Deploy prompts/arm2_v1.txt → measure on real gigs over N days
+2. Dashboard shows a weakness (e.g. acceptance rate plateaued at 68%)
+3. Read 5-10 LangSmith traces of low-rank-#1 selections → form hypothesis
+4. Edit prompt → save as prompts/arm2_v2.txt → bump PROMPT_VERSION
+5. Deploy v2 → measure → compare segmented metrics in dashboard
+6. v2 wins? Lock in. v2 loses? Roll back to v1. Log the experiment in prompts/README.md</code></pre>
 
-<pre><code># promptfooconfig.yaml
-prompts:
-  - prompts/v1_basic.txt
-  - prompts/v2_with_role.txt
-  - prompts/v3_with_examples.txt    # few-shot
+<p>Promptfoo, Ragas, and DeepEval are dev-time tools used <em>during this loop</em> — not as CI gates. They run on demand against a sample of recent recommendations.</p>
 
-tests:
-  - vars: {creator: ${creator_001_data}, business: ${biz_001_data}}
-    assert:
-      - type: faithfulness
-        threshold: 0.85
-      - type: latency
-        threshold: 5000  # ms
-      - type: cost
-        threshold: 0.30  # USD per call</code></pre>
+<h3>Simplified remediation playbook (dev-time iteration tools)</h3>
 
-<h3>Layer 5 — Regression suite (CI)</h3>
+<p>One library, one job. No CI gating.</p>
 
-<pre><code># .github/workflows/eval.yml
-on: [push, pull_request]
-jobs:
-  eval:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - run: pip install -r requirements.txt
-      - run: deepeval test eval/        # unit-style assertions
-      - run: python eval/run_golden_set.py
-      - run: python eval/check_thresholds.py
-        # FAILS if precision < 0.55 OR faithfulness < 0.80 OR cost > $0.30</code></pre>
+<table>
+  <thead><tr><th>Symptom</th><th>Tool</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td>Arm 2 not beating Arm 1 on composite outcome rate</td><td><strong>Ragas</strong></td><td>Run faithfulness on a sample of recent Arm 2 outputs. If LLM is citing past gigs that don't exist in the gigs table, tighten the grounding instruction in the prompt template.</td></tr>
+    <tr><td>Outputs broken, inconsistent, off-schema</td><td><strong>DeepEval</strong></td><td>Run assertion suite — rank ∈ {1,2,3}, no fabricated creator IDs, all cited gigs exist in the gigs table with status=completed. Fix prompt or schema.</td></tr>
+    <tr><td>Want to test a new prompt variant before deploying</td><td><strong>Promptfoo</strong></td><td>Run new prompt against a sample of recent gigs alongside current prompt. Compare outputs side-by-side. Deploy as new version if better, measure in dashboard.</td></tr>
+    <tr><td>One specific recommendation looks wrong</td><td><strong>LangSmith</strong></td><td>Open the trace for that gig. See exact inputs, LLM reasoning, output. Diagnose.</td></tr>
+    <tr><td>Trends over time, drift, cost-creep</td><td><strong>LangFuse</strong></td><td>Rolling per-arm and per-prompt-version metrics. If a metric drifts, drill into LangSmith for that window.</td></tr>
+  </tbody>
+</table>
 
-<p>Any PR that drops quality below thresholds is blocked.</p>
+<p><strong>Chain in practice:</strong> LangFuse spots Arm 2 drifting → LangSmith reads 5 bad traces → Ragas confirms hallucinated history → edit prompt template → Promptfoo previews the fix → deploy as arm2_v2 → dashboard segments confirm recovery.</p>
+
+<h3>CI — schema smoke test only</h3>
+
+<p>One small pytest check runs on every push: pipeline runs on 2-3 dummy gigs and asserts the output validates against the Pydantic schema. This catches "code is broken" — not "LLM output is bad." That's the only CI eval check, intentionally.</p>
 
 <!-- ====================================================================== -->
 <div class="part">13. Cost & Latency Targets</div>
@@ -794,16 +861,14 @@ jobs:
 <table>
   <thead><tr><th>Metric</th><th>Target (V1)</th><th>Stretch (V2)</th></tr></thead>
   <tbody>
-    <tr><td>Cost per prediction (single pair, real-time)</td><td>≤ $0.18</td><td>≤ $0.10 (with model routing)</td></tr>
-    <tr><td>Cost per query (top 20 cascade)</td><td>≤ $4.00</td><td>≤ $2.00</td></tr>
+    <tr><td>Cost per gig — Arm 1 (no LLM)</td><td>$0</td><td>$0</td></tr>
+    <tr><td>Cost per gig — Arm 2 (LLM, top 3 of 10)</td><td>≤ $0.30</td><td>≤ $0.15 (with model routing)</td></tr>
     <tr><td>Latency: Stage 1 (filter)</td><td>≤ 50ms</td><td>≤ 20ms</td></tr>
     <tr><td>Latency: Stage 2 (vector)</td><td>≤ 100ms</td><td>≤ 50ms (with cached embeddings)</td></tr>
-    <tr><td>Latency: Stage 3 (single LLM call)</td><td>≤ 3 sec</td><td>≤ 1.5 sec (smaller model where possible)</td></tr>
-    <tr><td>Latency: full query (parallelized, no inline gate)</td><td>≤ 4 sec</td><td>≤ 2 sec</td></tr>
-    <tr><td>Phase 4 batch — production audit cadence</td><td>nightly</td><td>hourly</td></tr>
-    <tr><td>Phase 4 — flagged predictions threshold for alerting</td><td>&gt; 5% per day</td><td>&gt; 2% per hour</td></tr>
-    <tr><td>Faithfulness (Ragas, measured offline)</td><td>≥ 0.85</td><td>≥ 0.92</td></tr>
-    <tr><td>Precision (golden set, Phase 3 eval)</td><td>≥ 75%</td><td>≥ 85%</td></tr>
+    <tr><td>Latency: Stage 3 (single LLM call)</td><td>≤ 3 sec</td><td>≤ 1.5 sec</td></tr>
+    <tr><td>Latency: full pipeline per gig (Arm 2)</td><td>≤ 4 sec</td><td>≤ 2 sec</td></tr>
+    <tr><td>Dashboard batch — cadence</td><td>nightly</td><td>hourly</td></tr>
+    <tr><td>Composite good-outcome rate — Arm 2 vs Arm 1</td><td>+ 10pp lift, p &lt; 0.05</td><td>+ 20pp lift</td></tr>
   </tbody>
 </table>
 
@@ -835,19 +900,23 @@ jobs:
   <thead><tr><th>Layer</th><th>Tool</th><th>Why</th></tr></thead>
   <tbody>
     <tr><td>Language</td><td>Python 3.13</td><td>Existing project standard</td></tr>
-    <tr><td>Synthetic data</td><td>Faker</td><td>Industry standard for synthetic data</td></tr>
-    <tr><td>Agent framework</td><td>LangGraph</td><td>State machine for multi-step prediction</td></tr>
+    <tr><td>Synthetic data</td><td>Faker + Claude (for profile descriptions)</td><td>Faker for structured fields; Claude for free-text bios in authentic Instagram style</td></tr>
+    <tr><td>Catalog storage</td><td>CSV</td><td>Immutable creator/business catalog — easy to inspect</td></tr>
+    <tr><td>Gig + recommendation storage</td><td>SQLite (stdlib)</td><td>Relational, queryable, joinable for dashboard. Single file. No infra. VS Code SQLite Viewer extension for inspection.</td></tr>
+    <tr><td>Agent framework</td><td>LangGraph</td><td>State machine for Stage 3 (load context → reason → emit top 3)</td></tr>
     <tr><td>LLM provider</td><td>Anthropic Claude (Sonnet 4.6)</td><td>Premium reasoning at moderate cost</td></tr>
-    <tr><td>Output validation</td><td>Pydantic</td><td>Structured output with type safety</td></tr>
+    <tr><td>Output validation</td><td>Pydantic</td><td>Structured output: Gig, CreatorRecommendation</td></tr>
     <tr><td>Embeddings</td><td>sentence-transformers (all-MiniLM-L6-v2)</td><td>Free, local, fast</td></tr>
     <tr><td>Vector ops</td><td>numpy / scikit-learn cosine_similarity</td><td>Standard numerical libraries</td></tr>
-    <tr><td>Tracing</td><td>LangSmith</td><td>Industry standard for LLM observability</td></tr>
-    <tr><td>Dashboards</td><td>LangFuse (self-hosted)</td><td>Open-source alternative; full data control</td></tr>
-    <tr><td>Faithfulness eval</td><td>Ragas</td><td>Standard for RAG/grounding measurement</td></tr>
-    <tr><td>LLM unit tests</td><td>DeepEval</td><td>pytest-style assertions for LLM outputs</td></tr>
-    <tr><td>Prompt A/B testing</td><td>Promptfoo</td><td>Standard for prompt experiment design</td></tr>
+    <tr><td>Tracing</td><td>LangSmith</td><td>Per-recommendation trace; drill into a single bad gig from the dashboard</td></tr>
+    <tr><td>Dashboards (LLM-side)</td><td>LangFuse</td><td>Rolling per-arm metrics; drift detection</td></tr>
+    <tr><td>Dashboards (outcome A/B)</td><td>Streamlit</td><td>Two-arm comparison segmented by prompt version; chi-squared significance</td></tr>
+    <tr><td>Faithfulness eval</td><td>Ragas</td><td>Hallucination check: did LLM cite real past gigs?</td></tr>
+    <tr><td>Output assertions</td><td>DeepEval</td><td>Schema, length, no fabricated IDs, rank valid</td></tr>
+    <tr><td>Prompt A/B preview</td><td>Promptfoo</td><td>Preview a new prompt version against current on recent gigs side-by-side, before deploying</td></tr>
+    <tr><td>Statistical tests</td><td>scipy.stats.chi2_contingency</td><td>Significance test between treatment arms</td></tr>
     <tr><td>CI</td><td>GitHub Actions (or local script for now)</td><td>Industry standard</td></tr>
-    <tr><td>Concurrency</td><td>asyncio</td><td>For parallelizing Stage 3 LLM calls</td></tr>
+    <tr><td>Concurrency</td><td>asyncio</td><td>For parallelizing Stage 3 LLM calls across top 10 candidates</td></tr>
   </tbody>
 </table>
 
@@ -858,53 +927,53 @@ jobs:
 
 <pre><code>matchscout-onemyle/
 ├── DESIGN.html                  # this document
+├── project_workflow.html        # phase-by-phase build plan + remediation appendix
 ├── README.md                    # project overview, "Onemyle PoC by Rajesh"
 ├── requirements.txt
 ├── .env.example
+├── recommend_creators.py        # CLI entry point: --gig-id GIG_ID → writes recommendations
 │
 ├── data/
-│   ├── generate_marketplace.py  # Faker-based generator
-│   ├── creators.csv             # 400 synthetic creators
-│   ├── businesses.csv           # 300 synthetic businesses
-│   ├── matches.csv              # 150 synthetic historical matches
-│   └── categories.json          # 8 categories + sub-categories + adjacency map
+│   ├── generate_marketplace.py  # Faker — creators + businesses catalog
+│   ├── generate_profiles.py     # Claude — Instagram-bio-style profile_description (one-time)
+│   ├── generate_gigs.py         # Faker — synthetic open gigs
+│   ├── creators.csv             # 400 creators (with profile_description column)
+│   ├── businesses.csv           # 300 businesses (with profile_description column)
+│   ├── matches.csv              # 150 historical matches → loaded as completed rows in gigs table
+│   ├── matchscout.db            # SQLite: gigs (all statuses), recommendations
+│   └── categories.json          # 8 categories + sub-categories
 │
 ├── matchscout/
 │   ├── __init__.py
-│   ├── filter.py                # Stage 1: rules-based hard filter
-│   ├── ranker.py                # Stage 2: vector similarity
-│   ├── agent.py                 # Stage 3: LangGraph + Claude (incl. Pydantic schema check)
-│   ├── pipeline.py              # orchestrates Stage 1 → 2 → 3 (real-time)
-│   ├── audit_batch.py           # Phase 4: offline production audit (nightly batch)
-│   ├── observability.py         # LangSmith + LangFuse + local logging
-│   └── schemas.py               # Pydantic models for predictions
+│   ├── db.py                    # SQLite schema, init, queries
+│   ├── data_loader.py           # creator + business CSV loaders (cached)
+│   ├── schemas.py               # Pydantic: Creator, Business, Gig, CreatorRecommendation
+│   ├── filter.py                # Stage 1 — rules-based hard filter (location/budget/content_type)
+│   ├── ranker.py                # Stage 2 — sentence-transformer cosine ranking
+│   ├── agent.py                 # Stage 3 — LangGraph + Claude, loads prompt from prompts/
+│   ├── pipeline.py              # orchestrator — arm assignment → Stage 1 → 2 → 3 → DB write
+│   ├── dashboard.py             # Streamlit two-arm comparison dashboard
+│   ├── dashboard_batch.py       # nightly aggregator: gigs → per-arm metrics → dashboard data
+│   ├── observability.py         # LangSmith + LangFuse setup
+│   └── tests/
+│       └── test_pipeline_smoke.py  # CI smoke test — 2-3 dummy gigs, validates schema
 │
-├── prompts/
-│   ├── v1_basic.txt
-│   ├── v2_with_role.txt
-│   └── v3_with_examples.txt
-│
-├── eval/
-│   ├── golden_set.json          # 50 hand-labeled matches
-│   ├── build_golden.py          # interactive labeling tool
-│   ├── ragas_eval.py            # faithfulness scoring
-│   ├── deepeval_tests.py        # LLM unit tests
-│   ├── promptfoo.yaml           # A/B test config
-│   ├── run_golden_set.py        # full eval runner
-│   ├── check_thresholds.py      # CI gate
-│   └── regression_suite.py      # complete regression script
+├── prompts/                     # versioned LLM prompt templates (THE tuning surface)
+│   ├── README.md                # prompt version log: what each version changed and why
+│   └── arm2_v1.txt              # current Arm 2 prompt template
 │
 ├── pm/
 │   ├── 01_prd.md                # 1-page PRD
 │   ├── 02_icp.md                # ICP for both marketplace sides
-│   ├── 03_eval_plan.md          # eval thresholds + production monitoring
+│   ├── 03_eval_plan.md          # outcome-based eval plan
 │   ├── 04_gtm_brief.md          # positioning, pricing, rollout
 │   ├── 05_risk_register.md      # AI-specific risks + mitigations
-│   └── 06_initiative_summary.md # Onemyle PoC summary doc
+│   ├── 06_initiative_summary.md # Onemyle PoC summary doc
+│   └── interview_pitch.md       # personal interview prep cheat sheet
 │
 └── .github/
     └── workflows/
-        └── eval.yml             # CI eval gate
+        └── smoke.yml            # CI — runs test_pipeline_smoke.py on push (NOT an eval gate)
 </code></pre>
 
 <!-- ====================================================================== -->
@@ -973,177 +1042,160 @@ jobs:
 
 <p>Imagine <strong>Maya</strong>, a Boston food photographer. And <strong>Tavola</strong>, a Boston fine-dining restaurant looking for photography. Both signed up to Onemyle. Neither knows the other exists.</p>
 
-<p>Onemyle has thousands of creators and thousands of businesses across 8 categories. The platform team wants AI to surface good matches — but with thousands on each side, brute-force scoring would cost a fortune and be too slow.</p>
+<p>Onemyle has hundreds of creators and hundreds of businesses across 8 categories. When a business posts a gig, the platform wants AI to surface the 3 best creators for that specific gig.</p>
 
-<p>So they build <strong>MatchScout</strong> — a 4-stage pipeline that finds quality matches efficiently.</p>
+<p>So they build <strong>MatchScout</strong> — a 3-stage pipeline with a 2-arm A/B that finds quality matches efficiently and proves the LLM is worth the cost.</p>
 
-<p>Before MatchScout can run, the team prepares two things:</p>
+<p>Before MatchScout can run, two pieces of preparation happen:</p>
 
 <ol>
-  <li><strong>Embeddings</strong> — every creator and business profile gets converted to a numerical vector (a "meaning fingerprint") using a free local model. Stored in a database. Done once, refreshed when profiles change.</li>
-  <li><strong>Golden test set</strong> — 50 historical creator-business pairs, hand-labeled with their actual outcomes (success/failure). This becomes the answer key for measuring whether MatchScout is any good.</li>
+  <li><strong>Profile descriptions</strong> — every creator and business writes a short bio (Instagram style) at signup. Stored as a permanent field on their profile.</li>
+  <li><strong>Embeddings</strong> — each creator and business gets its profile fields (niche_tags + bio + categories + subcategories) concatenated into a single string and converted to a vector using a small, free, local sentence-transformer. Stored alongside the profile. Refreshed when the profile changes.</li>
 </ol>
 
 <h3>A user moment — Tavola posts a gig</h3>
 
-<p>Tavola posts: <em>"Need food photography for our new tasting menu. Boston, $500-$1000."</em></p>
+<p>Tavola posts: <em>"Food photography for our new tasting menu. Boston, $500–$1000, 2 reels + photo set within 2 weeks."</em></p>
 
-<p>This triggers MatchScout. Onemyle wants to show Tavola the top 5 creators they should consider.</p>
+<p>This creates a new <code>gig</code> row in SQLite. Tavola clicks "Recommend Creators." That fires <code>recommend_creators.py --gig-id gig_001</code>, which runs the pipeline.</p>
 
-<h4>Stage 1 — Filter (~50ms, free)</h4>
-<p>Takes ALL 2,000 creators in the system. Drops anyone obviously wrong: wrong category (a car reviewer), wrong content type (a podcaster), wrong location (San Francisco only, not remote), wrong budget (charges $5,000 minimum), inactive accounts. Drops ~95%. Now down to ~100 plausible candidates.</p>
+<h4>Stage 1 — Hard filter (~10ms, free)</h4>
+<p>Takes all creators and drops the ones that are structurally incompatible: wrong location (and not remote-friendly), no budget overlap, no content-type overlap. After this filter we have, say, 80 candidates.</p>
 
-<h4>Stage 2 — Vector ranking (~200ms, free)</h4>
-<p>Tavola's gig description gets converted to a vector. Compared to the pre-computed vectors of the 100 candidates. Returns the top 20 by semantic similarity. This catches subtle fit — a creator who "specializes in fine dining and natural lighting" ranks higher than one who does "fast food and event coverage" even though both pass Stage 1's category filter.</p>
+<h4>Stage 2 — Vector ranker (~50ms, free)</h4>
+<p>Tavola's embedding is compared against each of the 80 candidates' embeddings via cosine similarity. Returns a ranked list X. This catches subtle vibe fit — a creator with bio mentioning "fine dining and natural lighting" ranks higher than one focused on "fast food and event coverage" even though both pass Stage 1.</p>
 
-<h4>Stage 3 — LLM agent (~3 sec total parallelized, ~$3.60)</h4>
-<p>For each of the top 20, send creator + business data to Claude with a prompt: <em>"Score this match. Cite specific signals. Recommend an action."</em> Claude returns structured output for each:</p>
+<h4>Treatment arm assignment</h4>
+<p>Random coin flip: 10% chance → Arm 1 (no_llm), 90% → Arm 2 (llm). The result is stamped on the gig row for later eval.</p>
 
-<pre><code>{
-  "creator_id": "creator_001 (Maya)",
-  "success_probability": 0.87,
-  "reasoning": "Boston location matches. Creator's $400-1200 range overlaps
-                Tavola's $500-1000. Creator has 23 completed gigs at 4.7 avg
-                rating, with niche tags 'fine_dining' and 'natural_lighting'
-                that align with Tavola's fine-dining positioning.",
-  "risk_factors": ["creator_typically_works_with_mid_tier", "first_collab"],
-  "recommended_action": "introduce"
-}</code></pre>
+<h4>Stage 3 — Arm-routed (Arm 1: free, instant; Arm 2: ~$0.30, ~3s)</h4>
 
-<p>20 such predictions are generated in parallel.</p>
+<p><strong>If Arm 1:</strong> take the top 3 of X by cosine score. Write 3 CreatorRecommendation rows. Done. No LLM call. Reasoning fields are null.</p>
 
-<h4>Stage 4 — Quality gate (~50ms per check)</h4>
-<p>Each prediction passes through gates:</p>
-<ul>
-  <li>Schema valid? (Pydantic checks structure)</li>
-  <li>Confidence above 0.5?</li>
-  <li>Does reasoning cite real fields, not invented ones?</li>
-  <li>Does the recommended action match the probability? (e.g., not "introduce" with 30% probability)</li>
-  <li>Is reasoning specific enough?</li>
-</ul>
+<p><strong>If Arm 2:</strong> take the top 10 of X. For each one, query the <code>gigs</code> table for their last-10 most recent completed gigs (<code>WHERE assigned_creator_id = X AND status = 'completed' ORDER BY completed_at DESC LIMIT 10</code>). Compute per-creator metrics (success count, fail count, follower count, avg rating) and per-metric ranks within the 10. Load the current prompt template (<code>prompts/arm2_v1.txt</code>), format in the gig brief + metrics table + recent gig history. Send to Claude. Claude returns ranked top 3 with reasoning, strengths, risks, key_signals per creator.</p>
 
-<p>Predictions that fail get retried with a corrective prompt OR flagged "low confidence — escalate to human." Predictions that pass get sorted by <code>success_probability</code>. Top 5 returned to Tavola.</p>
+<p>The 3 CreatorRecommendation rows are written to SQLite with <code>prompt_version="arm2_v1"</code> stamped on each.</p>
 
 <h4>The result Tavola sees</h4>
-<p>A ranked list of 5 creators with reasoning attached. Maya is #1. Tavola reaches out to Maya. They have a great collaboration. Both rate the gig highly. Marketplace wins.</p>
+<p>Just the 3 creator profiles. No reasoning, no scores, no risk flags. The reasoning is in SQLite — useful for post-hoc analysis and prompt iteration, but irrelevant to Tavola's decision. Tavola picks Maya. That sets <code>gig.assigned_creator_id</code>. Two weeks later the gig completes successfully → <code>gig.outcome = "success"</code>. This row is now an eval data point.</p>
 
 <h3>Behind the scenes (continuously)</h3>
 
-<p>While that prediction was happening, three things ran in the background:</p>
+<p>During Arm 2's LLM call:</p>
 
 <ol>
-  <li><strong>LangSmith</strong> captured a full trace of every step (Stage 1 filter logic, Stage 2 vector search, each Stage 3 LLM call, each Stage 4 gate decision). The platform team can debug "why did Maya rank above Carlos?" by clicking through the trace.</li>
-  <li><strong>LangFuse</strong> logged the cost ($3.60), latency (4.5 seconds), and success rate. Aggregated into dashboards the team checks daily.</li>
-  <li><strong>Local CSV log</strong> appended an audit row for compliance and historical analysis.</li>
+  <li><strong>LangSmith</strong> captured the full trace — the formatted prompt sent to Claude, the response, token counts, latency. The platform team can debug "why did Maya rank #1?" by clicking through the trace.</li>
+  <li><strong>LangFuse</strong> logged the cost (~$0.30 for this gig) into rolling per-arm and per-prompt-version dashboards.</li>
 </ol>
 
-<h3>What happens when the platform team improves the system</h3>
+<h3>What happens when the platform team improves the prompt</h3>
 
-<p>The team wants to improve match quality. They tweak the agent's prompt to be more specific.</p>
+<p>A few weeks in, the team notices Arm 2's top-1 selection rate is plateauing at 56%. They want to push it higher.</p>
 
-<p>They <code>git push</code> the change. <strong>GitHub Actions</strong> automatically:</p>
+<p>They open LangSmith and read 10 traces where Tavola-style businesses picked rank #2 or #3 instead of rank #1. They notice the LLM is over-weighting follower count for high-budget gigs. They open <code>prompts/arm2_v1.txt</code>, edit one principle ("for budgets above $1,500, weigh reliability over reach"), save as <code>prompts/arm2_v2.txt</code>, and bump <code>PROMPT_VERSION</code>.</p>
 
-<ol>
-  <li>Runs the agent against the 50-pair golden test set</li>
-  <li>Computes precision (87% → did it improve?), recall, faithfulness, cost-per-prediction</li>
-  <li>Compares to the previous version's scores</li>
-  <li><strong>If quality dropped → blocks the PR.</strong> The team must fix or revert.</li>
-  <li><strong>If quality improved → merge approved.</strong></li>
-</ol>
+<p>They deploy. Every recommendation from this point forward stamps <code>prompt_version="arm2_v2"</code>. The outcome dashboard now segments metrics by version.</p>
 
-<p>This is <strong>offline eval</strong> — it doesn't run on every prediction; it runs on every code change to make sure no one ships a worse version.</p>
+<p>Three weeks later: v2 acceptance rate is 71%, v1 was 64%. Chi-squared p-value: 0.03. v2 wins. They lock it in. The experiment log gets a new entry in <code>prompts/README.md</code>.</p>
 
-<p>Meanwhile, the <strong>runtime gate (Stage 4)</strong> keeps protecting users from individual bad predictions in production.</p>
+<p>No PR was blocked. No golden set was consulted. The dashboard told them what to do.</p>
 
 <h3>The roles each tool plays</h3>
 
 <table>
   <thead><tr><th>Tool</th><th>Job</th></tr></thead>
   <tbody>
-    <tr><td>Faker</td><td>Creates the synthetic creators/businesses (since Onemyle data isn't available yet)</td></tr>
-    <tr><td>sentence-transformers</td><td>Stage 2 — converts text to vectors for similarity comparison</td></tr>
-    <tr><td>LangGraph</td><td>Orchestrates Stage 3 as a multi-step state machine (load → analyze → predict → validate)</td></tr>
-    <tr><td>Claude (Anthropic)</td><td>The "brain" inside Stage 3 — does reasoning, generates explanations</td></tr>
-    <tr><td>Pydantic</td><td>Schema enforcement — Stage 4 first check</td></tr>
-    <tr><td>Custom Python (audit_batch.py)</td><td>Phase 4 offline audit on production logs (revised — moved from inline to batch)</td></tr>
-    <tr><td>Ragas</td><td>Faithfulness scoring — used in offline eval AND lightweight runtime check</td></tr>
-    <tr><td>DeepEval</td><td>pytest-style tests run in CI to catch behavioral regressions</td></tr>
-    <tr><td>Promptfoo</td><td>A/B test prompt variants when the team is iterating on prompts</td></tr>
-    <tr><td>LangSmith</td><td>Tracing — every prediction's full lifecycle is recorded</td></tr>
-    <tr><td>LangFuse</td><td>Cost + latency dashboards</td></tr>
-    <tr><td>GitHub Actions</td><td>Runs offline eval on every code push</td></tr>
+    <tr><td>Faker</td><td>Creates the synthetic catalog (since real Onemyle data isn't available yet)</td></tr>
+    <tr><td>Claude (one-time)</td><td>Generates profile_description bios for synthetic creators/businesses, stand-in for what real users would write at signup</td></tr>
+    <tr><td>SQLite</td><td>Holds gigs (all lifecycle states) + recommendations — relational, queryable, joinable</td></tr>
+    <tr><td>sentence-transformers</td><td>Stage 2 — converts profile text to vectors for cosine similarity</td></tr>
+    <tr><td>LangGraph</td><td>Orchestrates Stage 3 as a state machine (load metrics → load prompt → call LLM → validate)</td></tr>
+    <tr><td>Versioned prompt files</td><td>The primary tuning surface — edited as files in <code>prompts/</code>, not as inline code</td></tr>
+    <tr><td>Claude (runtime)</td><td>The "brain" inside Stage 3 Arm 2 — ranks 10 candidates → top 3 with reasoning</td></tr>
+    <tr><td>Pydantic</td><td>Inline schema validation on Stage 3 output</td></tr>
+    <tr><td>scipy.stats.chi2_contingency</td><td>Statistical significance test between treatment arms and between prompt versions</td></tr>
+    <tr><td>Streamlit (dashboard)</td><td>Two-arm outcome comparison, segmented by prompt_version, with drill-down to traces</td></tr>
+    <tr><td>LangSmith</td><td>Tracing — every Stage 3 LLM call's full lifecycle is recorded</td></tr>
+    <tr><td>LangFuse</td><td>Rolling per-arm + per-prompt-version cost + latency dashboards</td></tr>
+    <tr><td>Ragas (dev-time)</td><td>Faithfulness check on a sample during prompt iteration — NOT a CI gate</td></tr>
+    <tr><td>DeepEval (dev-time)</td><td>Output assertion suite — NOT a CI gate</td></tr>
+    <tr><td>Promptfoo (dev-time)</td><td>Side-by-side preview of a new prompt vs current on recent gigs — NOT a CI gate</td></tr>
+    <tr><td>pytest (CI)</td><td>Schema smoke test — only check that runs on every push</td></tr>
   </tbody>
 </table>
 
 <h3>The full lifecycle in one mental picture</h3>
 
 <div class="ascii-diagram">
-NEW USER signs up or posts a gig
+BUSINESS posts a gig + clicks "Recommend Creators"
         │
         ▼
-PIPELINE runs (Stages 1 → 2 → 3 → 4)
+PIPELINE runs:
+  Stage 1 hard filter → Stage 2 vector rank → arm assignment → Stage 3 (no_llm or llm)
         │
         ▼
-TOP 5 matches surfaced to user
+3 CreatorRecommendations written to SQLite
         │
-        │── Trace logged to LangSmith
+        │── LLM trace logged to LangSmith
         │── Cost/latency to LangFuse
-        │── Audit to local CSV
         │
         ▼
-USER acts on recommendations
+BUSINESS picks a creator → gig.assigned_creator_id set
         │
         ▼
-OUTCOMES eventually known
-(successful gig / failed / no engagement)
+GIG completes → outcome set (success / failed / no_response)
         │
         ▼
-NEW LABELED DATA → eventually feeds back into golden set
-                   for the next round of evaluation
+NIGHTLY DASHBOARD BATCH aggregates outcomes per (treatment_arm, prompt_version)
 
 
-MEANWHILE (offline / continuous):
+MEANWHILE (offline / on demand):
         │
-TEAM iterates on prompts / models / logic
-        │
-        ▼
-git push → CI runs offline eval against golden set
+TEAM observes outcome dashboard → spots an issue
         │
         ▼
-PR blocked or merged based on quality scores
+Reads LangSmith traces → diagnoses with Ragas / DeepEval
         │
         ▼
-Production updated (with confidence)
+Edits prompts/arm2_v1.txt → saves as arm2_v2.txt → bumps PROMPT_VERSION
+        │
+        ▼
+Promptfoo previews new prompt on recent gigs
+        │
+        ▼
+DEPLOY v2 → outcome dashboard segments confirm (or refute) the improvement
 </div>
 
-<h3>Why each stage matters</h3>
+<h3>Why each piece matters</h3>
 
 <ul>
-  <li><strong>Stage 1</strong> — without it, you'd score 2,000 candidates per query. Too expensive, too slow.</li>
-  <li><strong>Stage 2</strong> — without it, you'd hand the LLM 100 random "category match" candidates. Wastes Stage 3 budget on bad candidates.</li>
-  <li><strong>Stage 3</strong> — without it, you'd just have keyword matching. No reasoning. No "why this match." No nuance.</li>
-  <li><strong>Stage 4</strong> — without it, low-confidence or hallucinated predictions reach users. Trust dies.</li>
-  <li><strong>Offline eval</strong> — without it, you'd ship prompt changes blindly. Quality silently degrades.</li>
-  <li><strong>Observability</strong> — without it, when something goes wrong, you can't figure out why.</li>
+  <li><strong>Stage 1</strong> — without it, you'd embed and score every creator. Too slow at scale.</li>
+  <li><strong>Stage 2</strong> — without it, you'd hand the LLM the full candidate pool. Wastes Stage 3 budget and dilutes input quality.</li>
+  <li><strong>Stage 3 LLM (Arm 2)</strong> — without it, you'd just have cosine ranking. No reasoning over historical signals, no per-creator strengths/risks analysis.</li>
+  <li><strong>Arm 1 control</strong> — without it, you can't tell whether Stage 3 is earning its cost. Causal eval requires a baseline.</li>
+  <li><strong>Versioned prompt templates</strong> — without them, prompt iteration becomes git-diff-driven instead of outcome-driven.</li>
+  <li><strong>Outcome dashboard</strong> — without it, you ship prompt changes blindly. Quality silently drifts.</li>
+  <li><strong>Observability (LangSmith / LangFuse)</strong> — without it, when something goes wrong, you can't diagnose.</li>
 </ul>
 
 <p>Each layer earns its place.</p>
 
-<h3>What success looks like at the end of 4 weeks</h3>
+<h3>What success looks like at the end of the PoC</h3>
 
 <p>A working system where:</p>
 <ul>
-  <li>Tavola posts a gig → MatchScout returns 5 ranked creators in 5 seconds for ~$4</li>
-  <li>Each prediction has reasoning attached and has passed quality gates</li>
-  <li>Every prediction is traced and observable</li>
-  <li>Every code change runs through eval that blocks bad regressions</li>
+  <li>Tavola posts a gig → MatchScout writes 3 ranked creators to SQLite in ~3 seconds for ~$0.30 (Arm 2) or instantly for free (Arm 1)</li>
+  <li>Every recommendation is traced in LangSmith and stamped with its prompt version</li>
+  <li>The Streamlit dashboard shows a measurable causal lift of Arm 2 over Arm 1 — with chi-squared significance</li>
+  <li>Prompt iteration is empirical: every new prompt version's outcomes are tracked separately, so the team knows whether a change actually helped</li>
+  <li>CI runs only a schema smoke test — broken code is caught fast, but no synthetic golden set is burning engineering time</li>
   <li>The PM artifacts (PRD, ICP, eval plan, GTM brief, risk register) document the strategic thinking</li>
 </ul>
 
 <p>Plus a public GitHub repo and a credible Onemyle-initiative entry on the resume.</p>
 
 <footer>
-  MatchScout — Design Document v1.0 · 2026-05-09 · By Rajesh Ramani · Onemyle Investor & Pro Bono Product/AI Lead
+  MatchScout — Design Document · By Rajesh Ramani · Onemyle Investor & Pro Bono Product/AI Lead
 </footer>
 
 </body>

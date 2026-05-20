@@ -63,11 +63,11 @@
   }
 
   .timeline-overview {
-    background: linear-gradient(90deg, #28a745 0%, #28a745 30%, #f9a825 30%, #f9a825 38%, #ddd 38%, #ddd 100%);
+    background: linear-gradient(90deg, #28a745 0%, #28a745 50%, #f9a825 50%, #f9a825 58%, #ddd 58%, #ddd 100%);
     height: 30px; border-radius: 4px; margin: 18px 0; position: relative;
   }
   .timeline-overview::after {
-    content: 'Phase 0-1 complete · Phase 2 active · Phases 3-9 pending';
+    content: 'Phase 0-2 complete · Phase 3 next · Phases 4-8 pending';
     position: absolute; left: 50%; transform: translateX(-50%);
     top: 7px; color: #222; font-size: 10pt; font-weight: 600;
   }
@@ -92,11 +92,12 @@
   <thead><tr><th>Phase</th><th>Status</th><th>Effort</th></tr></thead>
   <tbody>
     <tr><td>Phase 0 — Setup</td><td>✅ Done</td><td>1 hour</td></tr>
-    <tr><td>Phase 1 — Synthetic data</td><td>✅ Done</td><td>1 day</td></tr>
-    <tr><td>Phase 2 — Build the 3-stage cascade (real-time)</td><td>🟡 Starting next</td><td>3-4 days</td></tr>
-    <tr><td>Phase 3 — Pre-deploy eval framework (CI gating)</td><td>⏳ Pending</td><td>3 days</td></tr>
-    <tr><td><strong>Phase 4 — Production audit batch (NEW)</strong></td><td>⏳ Pending</td><td>1-2 days</td></tr>
-    <tr><td>Phase 5 — Observability wiring (LangSmith + LangFuse)</td><td>⏳ Pending</td><td>1-2 days</td></tr>
+    <tr><td>Phase 1 — Synthetic catalog (creators + businesses)</td><td>✅ Done</td><td>1 day</td></tr>
+    <tr><td>Phase 1.5 — Profile descriptions + Gig + SQLite</td><td>✅ Done</td><td>0.5 day</td></tr>
+    <tr><td>Phase 2 — Recommender pipeline (3 stages × 2 arms)</td><td>✅ Done</td><td>3-4 days</td></tr>
+    <tr><td><strong>Phase 3 — CI smoke test only</strong></td><td>🟡 Next</td><td>0.5 day</td></tr>
+    <tr><td>Phase 4 — Outcome dashboard + prompt iteration loop</td><td>⏳ Pending</td><td>1-2 days</td></tr>
+    <tr><td>Phase 5 — Observability wiring (LangSmith + LangFuse)</td><td>⏳ Pending</td><td>1 day</td></tr>
     <tr><td>Phase 6 — PM artifacts</td><td>⏳ Pending</td><td>2 days</td></tr>
     <tr><td>Phase 7 — Polish + documentation</td><td>⏳ Pending</td><td>1 day</td></tr>
     <tr><td>Phase 8 — Onemyle review</td><td>⏳ Pending</td><td>~1 week</td></tr>
@@ -104,8 +105,8 @@
   </tbody>
 </table>
 
-<div style="background:#fff3cd; border-left:4px solid #f9a825; padding:12px 18px; margin:16px 0; border-radius:4px; font-size:10pt;">
-  <strong>Architecture revised 2026-05-10:</strong> Stage 4 runtime quality gate moved to OFFLINE batch (new Phase 4). Real-time pipeline is now 3 stages with only Pydantic schema validation inline. Heavier checks (faithfulness, forbidden terms, consistency) run as a nightly audit on production logs, with results in a dashboard for human remediation. Standard pattern for marketplace AI.
+<div style="background:#f0f4fa; border-left:4px solid #1a4d8f; padding:12px 18px; margin:16px 0; border-radius:4px; font-size:10pt;">
+  <strong>Architecture in one paragraph:</strong> Gig posted → Stage 1 hard filter (location · budget · content_type) → Stage 2 sentence-transformer cosine ranker over (niche_tags + profile_description + categories + subcategories) returns ranked list X → arm assignment: 10% random to Arm 1 (no-LLM, take top 3 by cosine), 90% to Arm 2 (LLM ranks top 3 from top 10 using a versioned prompt template, given each candidate's past-gig metrics). Recommendations write to SQLite; business picks one creator; outcome closes the loop. Streamlit dashboard with chi-squared significance compares the two arms. Eval is outcome-based — no pre-deploy golden set, no CI quality gate. See <a href="DESIGN.html#architecture">DESIGN.html#architecture</a> for the full diagram.
 </div>
 
 <!-- ====================================================================== -->
@@ -154,31 +155,85 @@
 <div class="arrow">▼</div>
 
 <!-- ====================================================================== -->
-<div class="phase active">
+<div class="phase">
   <div class="phase-header">
-    <span class="phase-title">Phase 2 — Build the 3-Stage Real-Time Cascade</span>
-    <span class="phase-status status-active">Active</span>
+    <span class="phase-title">Phase 1.5 — Profile descriptions + Gig + SQLite</span>
+    <span class="phase-status status-done">Done</span>
   </div>
-  <div class="phase-meta">~3-4 days · Goal: working real-time prediction pipeline end-to-end</div>
+  <div class="phase-meta">~0.5 day · Goal: data shape for the new gig-driven design</div>
 
-  <p><strong>What it is:</strong> Build the 3-stage cascade architecture that takes a creator + business pair and predicts match success in real time. (Heavier quality checks are now in the offline Phase 4 batch — see below.)</p>
+  <p><strong>What it is:</strong> Extend the data layer to support the gig-driven pipeline. Catalog (creators, businesses) exists; we need to add free-text profile descriptions, set up the SQLite store, and seed the gig and past-gig tables.</p>
 
-  <p><strong>Important — what data the pipeline uses:</strong></p>
+  <ol class="step-list">
+    <li><strong>Update <code>schemas.py</code></strong>: add <code>Gig</code>, <code>CreatorRecommendation</code> Pydantic models; add <code>profile_description: str</code> to Creator + Business; remove obsolete <code>MatchPrediction</code> + <code>PipelineResult</code>.</li>
+    <li><strong>Generate profile descriptions</strong> (stands in for what real users would write at signup): write <code>data/generate_profiles.py</code> — loops over creators.csv + businesses.csv, prompts Claude for an Instagram-bio-style 2-3 line description per entity, writes back to the CSVs as a new <code>profile_description</code> column. In production these would be authored by the user during onboarding; here we synthesize them once so the schema is the same. One-time, ~$40.</li>
+    <li><strong>Set up SQLite</strong>: write <code>matchscout/db.py</code> — creates <code>data/matchscout.db</code> with tables <code>gigs</code> and <code>recommendations</code>. Loads <code>matches.csv</code> into the <code>gigs</code> table as completed rows (status='completed' / 'failed' / 'no_response' based on the match's outcome).</li>
+    <li><strong>Generate synthetic open gigs</strong>: 30 newly posted gigs in the <code>gigs</code> table for live demos and pipeline runs.</li>
+    <li><strong>Install VS Code SQLite Viewer extension</strong> — opens <code>matchscout.db</code> in a spreadsheet view for friction-free inspection.</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> creators.csv + businesses.csv each have a <code>profile_description</code> column; <code>data/matchscout.db</code> has the <code>gigs</code> table populated with historical completed/failed gigs (from matches.csv) plus 30 newly-posted open gigs ready for the pipeline.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<div class="phase">
+  <div class="phase-header">
+    <span class="phase-title">Phase 2 — Recommender pipeline (3 stages × 2 arms)</span>
+    <span class="phase-status status-done">Done</span>
+  </div>
+  <div class="phase-meta">~3-4 days · Goal: working gig-driven recommender end-to-end</div>
+
+  <p><strong>What it is:</strong> Build the gig-driven recommender. <code>python recommend_creators.py --gig-id GIG_ID</code> runs the full pipeline: Stage 1 (rules filter) → Stage 2 (vector ranker) → arm-routed Stage 3 → writes 3 CreatorRecommendation rows to SQLite.</p>
+
+  <p><strong>Important — how data flows:</strong></p>
   <ul style="background:#f0f4fa;padding:10px 18px;border-radius:4px;font-size:10pt;">
-    <li>The pipeline reads the EXISTING <code>creators.csv</code> + <code>businesses.csv</code> from Phase 1 (no new data generated)</li>
-    <li>It predicts on NEW pairings — the 119,850 creator-business combinations that AREN'T in <code>matches.csv</code></li>
-    <li><code>matches.csv</code> is used for two things: (a) historical context the agent can cite ("this creator has 23 past gigs at 4.7 rating"), (b) the eval set later (Phase 3) to measure agent accuracy</li>
+    <li>Input: one open gig from the <code>gigs</code> table</li>
+    <li>Treatment arm assigned at runtime: 10% random → Arm 1 (no-LLM), 90% → Arm 2 (LLM). Recorded on the gig row.</li>
+    <li>Past gigs read from the <code>gigs</code> table (status='completed' / 'failed' rows) when Arm 2 — for the business AND for each top-10 candidate</li>
+    <li>Profile descriptions read as stored fields on Creator + Business — used by Stage 2 embedding (both arms)</li>
+    <li>Output: 3 rows in <code>recommendations</code> table per gig (rank 1, 2, 3). For Arm 2, also includes reasoning + strengths + risks + key_signals.</li>
   </ul>
 
   <ol class="step-list">
-    <li><strong>Stage 1 — Filter</strong> (rules): drop pairs that fail basic checks (wrong category, wrong location, no budget overlap)</li>
-    <li><strong>Stage 2 — Vector ranker</strong>: use sentence-transformers (small, free, local) to embed profiles and rank candidates by semantic similarity</li>
-    <li><strong>Stage 3 — LLM agent</strong>: LangGraph state machine + Claude reasons about top candidates and outputs structured prediction (probability, reasoning, risk flags, recommended action). Pydantic schema validation runs INLINE here (~1ms, prevents broken JSON). All other quality checks moved to Phase 4 batch.</li>
-    <li><strong>Pipeline orchestrator</strong>: runs Stage 1 → 2 → 3 end-to-end</li>
-    <li>Smoke-test on a few creator-business pairs; verify output shape</li>
+    <li><strong>Stage 1 — <code>filter.py</code></strong>: rules filter. Inputs: <code>gig</code> + creators pool. Three rules: location compatible, budget overlap, content_type overlap. Returns N candidates.</li>
+    <li><strong>Stage 2 — <code>ranker.py</code></strong>: cosine similarity. Embedding text per side = niche_tags + profile_description + primary_category + secondary_categories + primary_subcategories. sentence-transformers/all-MiniLM-L6-v2 (local). Returns ranked list X.</li>
+    <li><strong>Stage 3 — <code>agent.py</code></strong>: LangGraph state machine with two routes based on <code>gig.treatment_arm</code>:
+      <ul>
+        <li><strong>no_llm</strong>: emit top 3 of X by cosine score. No LLM call. reasoning, strengths, risks fields are null.</li>
+        <li><strong>llm</strong>: take top 10 of X; for each, query the <code>gigs</code> table for up to 10 most recent completed gigs (<code>WHERE assigned_creator_id = X AND status='completed' ORDER BY completed_at DESC LIMIT 10</code>); compute per-creator metrics (success count, fail count, follower count, avg rating) and per-metric ranks within the 10; load the versioned prompt template (<code>prompts/arm2_v1.txt</code>); call Claude with the formatted prompt; parse + validate output via Pydantic; emit top 3 with reasoning + strengths + risks + key_signals.</li>
+      </ul>
+    </li>
+    <li><strong>Prompt template — <code>prompts/arm2_v1.txt</code></strong>: the LLM ranking instructions (versioned, edited as a file, not inlined in code). Stamped on each recommendation via <code>prompt_version</code> column.</li>
+    <li><strong>Pipeline — <code>pipeline.py</code></strong>: orchestrates Stage 1 → Stage 2 → arm assignment → Stage 3 → write recommendations to SQLite.</li>
+    <li><strong>Entry point — <code>recommend_creators.py</code></strong>: CLI script taking <code>--gig-id</code>, stand-in for the future "Recommend Creators" UI button.</li>
+    <li>Smoke-test: run pipeline on 5 gigs, verify recommendations are written, manually inspect quality via VS Code SQLite Viewer.</li>
   </ol>
 
-  <div class="deliverables">📦 <strong>Deliverable:</strong> Run <code>python -m matchscout.pipeline --business biz_001</code> and get top 5 ranked creator predictions with reasoning, in ~4 seconds for ~$3.60</div>
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Run <code>python recommend_creators.py --gig-id gig_001</code> and get 3 ranked recommendations written to SQLite. Run on all 30 open gigs in ~2 minutes. Inspect via VS Code SQLite Viewer.</div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- ====================================================================== -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-title">Phase 3 — CI smoke test only</span>
+    <span class="phase-status status-active">Next</span>
+  </div>
+  <div class="phase-meta">~0.5 day · Goal: catch broken code, not bad LLM output</div>
+
+  <p><strong>What it is:</strong> Deliberately minimal. The real eval is outcome-based (Phase 4). The only thing CI checks is that the pipeline runs end-to-end on a few dummy gigs and produces schema-valid output. No synthetic golden set, no quality thresholds, no faithfulness gates.</p>
+
+  <p><strong>Why so light?</strong> Pre-deploy eval on synthetic data is intellectually satisfying but doesn't predict production outcomes — and it adds engineering overhead (hand-label, maintain). Mature production teams deploy LLM features behind A/B tests with minimal pre-deploy eval. This project follows that pattern.</p>
+
+  <ol class="step-list">
+    <li><strong>Write <code>matchscout/tests/test_pipeline_smoke.py</code></strong>: ~30 lines of pytest. Run pipeline on 2-3 dummy gigs (one for each arm). Assert: output is valid Pydantic, 3 recommendations per gig, no exceptions raised.</li>
+    <li><strong>Add <code>.github/workflows/smoke.yml</code></strong>: runs <code>pytest -q matchscout/tests/</code> on every push.</li>
+    <li><strong>Do NOT build</strong>: golden_set.json, run_golden_set.py, check_thresholds.py, regression_suite.py — these are not part of this design.</li>
+  </ol>
+
+  <div class="deliverables">📦 <strong>Deliverable:</strong> CI runs in &lt; 60 seconds and catches "code is broken" before merge. Bad LLM output is detected by the Phase 4 outcome dashboard, not by pre-deploy eval.</div>
 </div>
 
 <div class="arrow">▼</div>
@@ -186,72 +241,44 @@
 <!-- ====================================================================== -->
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 3 — Eval Framework</span>
+    <span class="phase-title">Phase 4 — Outcome dashboard + prompt iteration loop</span>
     <span class="phase-status status-future">Pending</span>
   </div>
-  <div class="phase-meta">~3-4 days · Goal: measurable quality, locked thresholds, CI gating</div>
+  <div class="phase-meta">~1-2 days · Goal: causal measurement of LLM lift + closed-loop prompt iteration</div>
 
-  <p><strong>What it is:</strong> Without measurement, the AI is "vibes." Build a multi-layer eval system that quantifies quality and prevents regressions.</p>
-
-  <ol class="step-list">
-    <li><strong>Build golden test set</strong>: hand-label 50 creator-business pairs with expected outcomes (success/fail) and expected reasoning themes → <code>eval/golden_set.json</code></li>
-    <li><strong>Wire up Ragas</strong>: measures faithfulness — did the agent's reasoning cite signals actually present in the input?</li>
-    <li><strong>Wire up DeepEval</strong>: pytest-style assertions — output schema valid, no invented fields, self-consistent action</li>
-    <li><strong>Wire up Promptfoo</strong>: A/B test 3 prompt variants on golden set, pick the best</li>
-    <li><strong>Build regression suite</strong>: full eval runner with thresholds (precision ≥ 75%, faithfulness ≥ 0.85, cost ≤ $0.30)</li>
-    <li><strong>Wire up CI</strong>: GitHub Actions runs eval on every push; blocks PR if quality drops</li>
-  </ol>
-
-  <div class="deliverables">📦 <strong>Deliverable:</strong> Full eval framework. Numbers like "precision 87%, faithfulness 0.84, $0.18 per prediction" we can put in PRD and resume.</div>
-</div>
-
-<div class="arrow">▼</div>
-
-<!-- ====================================================================== -->
-<div class="phase future">
-  <div class="phase-header">
-    <span class="phase-title">Phase 4 — Production Audit Batch (NEW)</span>
-    <span class="phase-status status-future">Pending</span>
-  </div>
-  <div class="phase-meta">~1-2 days · Goal: heavier quality checks on production logs (offline)</div>
-
-  <p><strong>What it is:</strong> Replaces the original "Stage 4 inline gate." Runs nightly (or hourly) on production prediction logs. Catches quality issues that the inline pipeline doesn't have time to check.</p>
-
-  <p><strong>Why offline batch instead of inline gate:</strong> Faster real-time response, lower per-prediction cost, simpler real-time pipeline. Trade-off: some bad predictions reach users until the next batch flags them. Mitigated by dashboard alerts and remediation workflow. Standard pattern at Airbnb / DoorDash / Uber.</p>
+  <p><strong>What it is:</strong> The entire eval surface for this project. Reads completed gigs from SQLite, segments by treatment_arm and prompt_version, computes outcome metrics, runs chi-squared significance, renders a Streamlit dashboard. When metrics regress, the simplified remediation toolkit (Appendix) drives prompt iteration.</p>
 
   <ol class="step-list">
-    <li><strong>Read production prediction logs</strong> from last N hours (predictions.csv + LangSmith traces)</li>
-    <li><strong>Run Ragas faithfulness</strong> on each prediction — was reasoning grounded in input?</li>
-    <li><strong>Forbidden term check</strong> — did the agent reference data fields we don't track?</li>
-    <li><strong>Self-consistency check</strong> — does recommended_action align with success_probability?</li>
-    <li><strong>Confidence threshold violations</strong> — flag low-confidence predictions for review</li>
-    <li><strong>Aggregate to dashboard</strong> — daily summary of flagged predictions with drill-down</li>
-    <li><strong>Alerting</strong> — email/Slack if &gt; 5% of predictions failed audit in a day</li>
-    <li><strong>Remediation workflow</strong> — flagged predictions surface for marketplace ops review</li>
+    <li><strong><code>dashboard_batch.py</code></strong> — reads <code>gigs</code> + <code>recommendations</code> where status='completed'.</li>
+    <li><strong>Group by (treatment_arm, prompt_version)</strong> — two arms (no_llm, llm), with the LLM arm sub-grouped by prompt version (arm2_v1, arm2_v2, ...).</li>
+    <li><strong>Compute per group</strong>: N, acceptance rate, top-1 selection rate, gig success rate when accepted, composite good-outcome rate.</li>
+    <li><strong>Chi-squared significance</strong> — Arm 1 vs Arm 2 (scipy.stats.chi2_contingency).</li>
+    <li><strong>Render to Streamlit</strong> (<code>dashboard.py</code>) — side-by-side table, bar charts per metric, drill-down to specific gigs with LangSmith trace links.</li>
+    <li><strong>Prompt iteration loop</strong>: when a metric regresses or plateaus, follow the appendix remediation chain — LangFuse spots drift → LangSmith reads bad traces → Ragas/DeepEval diagnose → edit prompt template → bump <code>PROMPT_VERSION</code> → deploy as <code>arm2_v2</code> → dashboard segments confirm recovery. Log each version's rationale in <code>prompts/README.md</code>.</li>
+    <li><strong>Alerting (optional)</strong> — flag if Arm 2 falls below Arm 1 on composite metric (suggests prompt regression).</li>
   </ol>
 
-  <div class="deliverables">📦 <strong>Deliverable:</strong> Nightly audit job + dashboard showing audit results + alerting on threshold breaches</div>
+  <div class="deliverables">📦 <strong>Deliverable:</strong> <code>streamlit run matchscout/dashboard.py</code> shows a two-arm comparison with chi-squared p-values, segmented by prompt version. Demonstrable to Onemyle stakeholders.</div>
 </div>
 
 <div class="arrow">▼</div>
 
 <div class="phase future">
   <div class="phase-header">
-    <span class="phase-title">Phase 5 — Observability Wiring</span>
+    <span class="phase-title">Phase 5 — Observability wiring (LangSmith + LangFuse)</span>
     <span class="phase-status status-future">Pending</span>
   </div>
-  <div class="phase-meta">~1-2 days · Goal: traceable, debuggable, cost-monitored predictions</div>
+  <div class="phase-meta">~1 day · Goal: traceable, debuggable, cost-monitored recommendations</div>
 
-  <p><strong>What it is:</strong> Without observability, when something goes wrong you can't debug it. Wire up tracing and cost monitoring (which the Phase 4 batch and humans both rely on).</p>
+  <p><strong>What it is:</strong> The Phase 4 dashboard shows aggregate trends. When something looks wrong, you need to drill into <em>specific</em> recommendations. This phase wires up the tools that let you do that — and is the source feed for the simplified 5-tool remediation playbook.</p>
 
   <ol class="step-list">
-    <li><strong>LangSmith integration</strong>: every LLM call traced — inputs, outputs, latency, token counts</li>
-    <li><strong>LangFuse integration</strong>: aggregated dashboards — cost per prediction, daily spend, p95 latency</li>
-    <li><strong>Local audit log</strong>: append-only CSV of every prediction (feeds Phase 4 batch)</li>
-    <li><strong>Per-prediction cost tracking</strong>: dollar cost computed and logged for each call</li>
+    <li><strong>LangSmith integration</strong>: every Stage 3 LLM call traced — inputs, prompt, output, latency, token counts. Trace ID stored on each recommendation row for click-through from dashboard.</li>
+    <li><strong>LangFuse integration</strong>: rolling dashboards — cost per recommendation by arm, daily spend, p95 latency, error rate. Drift detection on Arm 2 quality.</li>
+    <li><strong>Per-recommendation cost tracking</strong>: dollar cost computed from token counts, written to <code>recommendations.cost_usd</code> column.</li>
   </ol>
 
-  <div class="deliverables">📦 <strong>Deliverable:</strong> Live dashboards. Click any prediction → see full trace. Watch cost trends in real time.</div>
+  <div class="deliverables">📦 <strong>Deliverable:</strong> Click any recommendation in the Streamlit dashboard → opens its LangSmith trace. LangFuse shows rolling per-arm cost + latency.</div>
 </div>
 
 <div class="arrow">▼</div>
@@ -353,29 +380,25 @@
   <div class="deliverables">📦 <strong>Deliverable:</strong> Production AI feature live in the Onemyle marketplace. Real users. Real impact.</div>
 </div>
 
-<h2>Three eval scopes — Phase 3 vs Phase 4 vs inline</h2>
+<h2>One eval scope (outcome-based)</h2>
 
-<p>Three different eval scopes, each catching different problems:</p>
+<p>Quality eval is a single layer: the Phase 4 outcome dashboard segmenting by treatment_arm and prompt_version. There is no pre-deploy golden set, no CI quality gate, no faithfulness threshold blocking PRs. CI runs only a schema smoke test that catches broken code, not bad LLM output.</p>
 
 <table>
-  <thead><tr><th></th><th>Inline (in Stage 3)</th><th>Phase 3 (Pre-Deploy)</th><th>Phase 4 (Production Audit)</th></tr></thead>
+  <thead><tr><th></th><th>Phase 3 (CI smoke test)</th><th>Phase 4 (Outcome A/B)</th></tr></thead>
   <tbody>
-    <tr><td>Runs</td><td>Every prediction (real time)</td><td>Every code push (CI)</td><td>Nightly batch on prod logs</td></tr>
-    <tr><td>Against</td><td>THIS prediction's JSON shape</td><td>The 50-pair golden set</td><td>Last 24h of real predictions</td></tr>
-    <tr><td>Catches</td><td>Broken JSON, missing fields</td><td>Systemic regressions before deploy</td><td>Bad individual predictions in prod</td></tr>
-    <tr><td>Decides</td><td>Hard fail / log + continue</td><td>Block PR merge if quality drops</td><td>Flag for review, alert ops team</td></tr>
-    <tr><td>Speed</td><td>Must be ~1ms (Pydantic only)</td><td>Can be slow (runs whole golden set)</td><td>Can be slow (overnight is fine)</td></tr>
-    <tr><td>Tools</td><td>Pydantic only</td><td>Ragas, DeepEval, Promptfoo, regression suite</td><td>Ragas, custom Python checks, dashboard</td></tr>
+    <tr><td>Runs</td><td>Every code push (pytest)</td><td>Nightly batch on completed gigs</td></tr>
+    <tr><td>Against</td><td>2-3 dummy gigs (in-test fixtures)</td><td>Real treatment-arm outcomes</td></tr>
+    <tr><td>Catches</td><td>Broken code, schema violations</td><td>Whether LLM beats no-LLM baseline; arm-level + prompt-version drift</td></tr>
+    <tr><td>Decides</td><td>Block PR if pipeline crashes</td><td>Drives prompt iteration loop</td></tr>
+    <tr><td>Tools</td><td>pytest + Pydantic schema validation</td><td>SQLite aggregation, scipy chi-squared, Streamlit dashboard</td></tr>
+    <tr><td>Speed</td><td>&lt; 60 sec</td><td>Nightly batch</td></tr>
   </tbody>
 </table>
 
-<p><strong>Analogy:</strong></p>
-<ul>
-  <li><strong>Inline</strong> = passport check at the gate (every passenger, instant, basic)</li>
-  <li><strong>Phase 3</strong> = airline maintenance audit before takeoff (per-fleet)</li>
-  <li><strong>Phase 4</strong> = post-flight safety review (per-flight, after the fact)</li>
-</ul>
-<p>You need all three. Each catches different problems at different speeds.</p>
+<p><strong>What's deliberately missing:</strong> pre-deploy synthetic golden set, hand-labeled quality thresholds, regression suite blocking PRs. These patterns are common in tutorials but don't predict production outcomes — they grade your own homework on synthetic data. Mature production teams use A/B tests instead, and so does this project.</p>
+
+<p><strong>What survives from the eval toolkit:</strong> Ragas, DeepEval, Promptfoo, LangSmith, LangFuse are used as DEV-TIME ITERATION TOOLS during prompt refinement (see appendix). They are NOT in CI.</p>
 
 <h2>What eval actually measures (broader than prompts)</h2>
 
@@ -401,11 +424,12 @@
   <thead><tr><th>Phase</th><th>Question it answers</th></tr></thead>
   <tbody>
     <tr><td>0 — Setup</td><td>"Can I write Python code in this project?"</td></tr>
-    <tr><td>1 — Synthetic data</td><td>"What does the marketplace look like?"</td></tr>
-    <tr><td>2 — Real-time cascade</td><td>"How does AI score a match in real time?"</td></tr>
-    <tr><td>3 — Pre-deploy eval</td><td>"Is this code version good enough to ship?"</td></tr>
-    <tr><td>4 — Production audit batch</td><td>"Are individual predictions in prod actually high quality?"</td></tr>
-    <tr><td>5 — Observability</td><td>"Why did the AI say that?"</td></tr>
+    <tr><td>1 — Synthetic catalog</td><td>"What does the marketplace look like?"</td></tr>
+    <tr><td>1.5 — Gig + profiles + SQLite</td><td>"What does a posted gig and a creator bio look like in our data?"</td></tr>
+    <tr><td>2 — Recommender pipeline</td><td>"For a given gig, what 3 creators does the system recommend, and via which arm?"</td></tr>
+    <tr><td>3 — CI smoke test</td><td>"Does the code still run end-to-end without crashing?"</td></tr>
+    <tr><td>4 — Outcome dashboard</td><td>"Does the LLM beat the no-LLM baseline? Which prompt version performs best?"</td></tr>
+    <tr><td>5 — Observability</td><td>"Why did the AI recommend this specific creator?"</td></tr>
     <tr><td>6 — PM artifacts</td><td>"What's the strategic case for this product?"</td></tr>
     <tr><td>7 — Polish</td><td>"Can a stranger understand what I built?"</td></tr>
     <tr><td>8 — Onemyle review</td><td>"Is this a real initiative or a hobby project?"</td></tr>
@@ -418,20 +442,263 @@
 <table>
   <thead><tr><th>After phase</th><th>Interview-ready claim</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td>"I built a synthetic marketplace dataset to test marketplace AI patterns"</td></tr>
-    <tr><td>2</td><td>"I designed and built a 3-stage real-time cascade for marketplace match prediction"</td></tr>
-    <tr><td>3</td><td>"I achieved X% precision and Y faithfulness on golden set with a regression suite blocking bad PRs"</td></tr>
-    <tr><td>4</td><td>"I added an offline production audit batch that catches quality issues post-hoc and surfaces them to a remediation dashboard — same pattern Airbnb / DoorDash use"</td></tr>
-    <tr><td>5</td><td>"Every prediction is fully traced and cost-tracked in production-style observability"</td></tr>
-    <tr><td>6</td><td>"I authored the full PM artifact set — PRD, ICP, eval plan, GTM brief, risk register"</td></tr>
-    <tr><td>7</td><td>"You can review the full repo at github.com/..."</td></tr>
+    <tr><td>1</td><td>"I built a synthetic marketplace catalog — 400 creators + 300 businesses + an 8-category taxonomy — to test marketplace AI patterns"</td></tr>
+    <tr><td>1.5</td><td>"I extended the data model with a Gig entity, generated Instagram-bio-style profile descriptions on creators and businesses, and put relational data in SQLite for queryability"</td></tr>
+    <tr><td>2</td><td>"I built a two-stage gig-driven recommender — rules + sentence-transformer cosine — with an LLM re-ranker on top, and held out 10% of gigs as a no-LLM control"</td></tr>
+    <tr><td>3</td><td>"CI runs a pytest smoke test that validates the pipeline end-to-end against the Pydantic schema. No synthetic golden set — I deliberately avoided that pattern in favor of outcome A/B"</td></tr>
+    <tr><td>4</td><td>"Streamlit outcome dashboard with chi-squared significance — segments by treatment arm AND prompt version. The prompt is a versioned template file, so I can causally measure prompt iterations against real outcomes"</td></tr>
+    <tr><td>5</td><td>"Every recommendation is traced in LangSmith and cost-tracked in LangFuse; the dashboard links directly to traces for drill-down"</td></tr>
+    <tr><td>6</td><td>"I authored the full PM artifact set — PRD, ICP for both marketplace sides, eval plan grounded in the A/B framework, GTM brief, risk register"</td></tr>
+    <tr><td>7</td><td>"You can review the full repo and dashboard at github.com/..."</td></tr>
     <tr><td>8</td><td>"This is a formal initiative at Onemyle, where I serve as Investor & Pro Bono Product/AI Lead"</td></tr>
     <tr><td>9</td><td>"It's now live in production at Onemyle"</td></tr>
   </tbody>
 </table>
 
+<!-- ====================================================================== -->
+<h2>Appendix — Simplified Remediation Playbook</h2>
+
+<p style="color:#666;font-size:10.5pt;">When the Phase 4 outcome dashboard shows Arm 2 is not beating Arm 1 (or a new prompt version is worse than the previous one), follow this playbook. One library, one job. No nested conditionals.</p>
+
+<table>
+  <thead><tr><th>Symptom</th><th>Tool</th><th>What you do</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Arm 2 not beating Arm 1 (LLM-with-history ≤ no-LLM)</td>
+      <td><strong>Ragas</strong></td>
+      <td>Run faithfulness on Arm 2 reasoning. If score is low, the LLM is hallucinating past gigs (citing pairs that don't exist in the gigs table). Tighten prompt to require literal references to gigs-table rows.</td>
+    </tr>
+    <tr>
+      <td>Outputs broken, inconsistent, or off-schema</td>
+      <td><strong>DeepEval</strong></td>
+      <td>Run the assertion suite: rank ∈ {1,2,3}, no fabricated creator IDs, historical_signals reference real gigs-table rows, length within bounds. Fix what fails.</td>
+    </tr>
+    <tr>
+      <td>Want to test a new prompt variant before deploying it</td>
+      <td><strong>Promptfoo</strong></td>
+      <td>Run the new prompt against a sample of recent real gigs alongside the current prompt. Compare outputs side-by-side. If better, deploy as a new prompt version and measure in the outcome dashboard.</td>
+    </tr>
+    <tr>
+      <td>One specific recommendation looks wrong</td>
+      <td><strong>LangSmith</strong></td>
+      <td>Open that gig's trace. See exact inputs, LLM reasoning, output tokens. Decide if it's a prompt / data / model issue.</td>
+    </tr>
+    <tr>
+      <td>Trends over time, drift, cost-creep</td>
+      <td><strong>LangFuse</strong></td>
+      <td>Dashboard shows rolling acceptance / success / cost per arm. If a metric drifts, drill into LangSmith traces for that time window.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>How they chain together (the loop)</h3>
+
+<pre style="background:#f6f8fa; padding:14px; border-radius:4px; font-size:9.5pt;">
+LangFuse dashboard shows Arm 2 drifting down
+        ↓
+Open LangSmith — read 5 recent Arm 2 traces
+        ↓
+Suspect hallucination → Ragas faithfulness sweep on a sample
+        ↓
+Confirmed: LLM citing fake past gigs
+        ↓
+Edit prompts/arm2_v1.txt → save as prompts/arm2_v2.txt
+        ↓
+Promptfoo preview: run new prompt on recent gigs alongside v1
+        ↓
+Deploy v2 (bump PROMPT_VERSION) → outcome dashboard segments confirm recovery
+        ↓
+DeepEval re-checks structural integrity of v2 outputs
+</pre>
+
+<p>Five tools, one job each. <strong>None of these run in CI</strong> — they are dev-time tools used during prompt iteration. CI runs only the schema smoke test. The eval that decides whether the LLM earns its cost is the outcome dashboard, not these tools.</p>
+
+<h2>Appendix — pandas DataFrame Primer</h2>
+
+<p style="color:#666;font-size:10pt;">Quick reference for the DataFrame patterns used in <code>data_loader.py</code>. Read this if you ever need a refresher on what <code>df[col]</code>, <code>.apply()</code>, or <code>eval()</code> are doing.</p>
+
+<h3>What is a DataFrame?</h3>
+
+<p>A <strong>DataFrame</strong> (<code>df</code>) is a 2-D table — rows × columns — living in Python memory. Think spreadsheet or SQL result set. Each row is one record (e.g. one creator); each column is one attribute across all records.</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt; overflow-x:auto;">
+            id            name  primary_category  follower_count   niche_tags
+   0   cre_0001    John Smith              Food            8421   "['vegan']"
+   1   cre_0002    Mary Jones            Beauty           24010   "['organic', 'cruelty-free']"
+   2   cre_0003    Sam Lee               Fitness            512   "[]"
+   ...
+   399 cre_0400    Lisa Park              Auto             1893   "['classic-cars']"
+</pre>
+
+<h3>What is <code>df[col]</code>?</h3>
+
+<p><code>df[col]</code> selects <strong>one column</strong> and returns it as a 1-D <strong>Series</strong> — a labeled list with row indices preserved.</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+df["niche_tags"]
+# 0      "['vegan']"
+# 1      "['organic', 'cruelty-free']"
+# 2      "[]"
+# ...
+# 399    "['classic-cars']"
+# Name: niche_tags, dtype: object
+</pre>
+
+<p>The number on the left is the row index; the value on the right is the cell content; <code>dtype: object</code> tells you the column type.</p>
+
+<h3>Selecting / inspecting values — REPL commands to try</h3>
+
+<p>Open a Python REPL inside the venv to explore your actual data:</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+cd ~/ai/ai_engineer_program
+source .venv/bin/activate
+cd matchscout-onemyle
+python
+</pre>
+
+<table>
+  <thead><tr><th>Command</th><th>What it returns</th></tr></thead>
+  <tbody>
+    <tr><td><code>df = pd.read_csv("data/creators.csv")</code></td><td>Load CSV into a DataFrame</td></tr>
+    <tr><td><code>df.shape</code></td><td><code>(400, 17)</code> — rows × columns</td></tr>
+    <tr><td><code>list(df.columns)</code></td><td>All column names as a list</td></tr>
+    <tr><td><code>df.head()</code></td><td>First 5 rows, all columns</td></tr>
+    <tr><td><code>df.head(3)</code></td><td>First 3 rows</td></tr>
+    <tr><td><code>df.tail(2)</code></td><td>Last 2 rows</td></tr>
+    <tr><td><code>df["niche_tags"]</code></td><td>One column as a Series (all 400 values)</td></tr>
+    <tr><td><code>df["niche_tags"].head()</code></td><td>First 5 values of that column</td></tr>
+    <tr><td><code>df["niche_tags"].iloc[0]</code></td><td>One specific cell — value at row 0</td></tr>
+    <tr><td><code>type(df["niche_tags"].iloc[0])</code></td><td><code>&lt;class 'str'&gt;</code> — string from CSV</td></tr>
+    <tr><td><code>df[["id", "name"]]</code></td><td>DataFrame with just those 2 columns (note double brackets)</td></tr>
+    <tr><td><code>df[df["primary_category"] == "Food"]</code></td><td>Boolean filter — only Food creators</td></tr>
+    <tr><td><code>df[df["follower_count"] &gt; 50000]</code></td><td>Creators with &gt;50K followers</td></tr>
+  </tbody>
+</table>
+
+<h3>Notation summary</h3>
+
+<table>
+  <thead><tr><th>Notation</th><th>Returns</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><code>df</code></td><td>DataFrame</td><td>Whole 2-D table</td></tr>
+    <tr><td><code>df[col]</code></td><td>Series</td><td>One column (1-D, labeled list)</td></tr>
+    <tr><td><code>df[[col1, col2]]</code></td><td>DataFrame</td><td>Subset of columns (still 2-D)</td></tr>
+    <tr><td><code>df[col].iloc[i]</code></td><td>scalar</td><td>One cell — string, list, int, whatever</td></tr>
+    <tr><td><code>df.head()</code></td><td>DataFrame</td><td>Top 5 rows of everything</td></tr>
+    <tr><td><code>df[col].head()</code></td><td>Series</td><td>Top 5 values of that one column</td></tr>
+  </tbody>
+</table>
+
+<h3>What does <code>df[col] = df[col].apply(fn)</code> do?</h3>
+
+<p>Column-wise transformation. Three steps in one line:</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+df[col]                  # SELECT  — grab one column as a Series
+df[col].apply(fn)        # MAP     — run fn on EACH cell, return a new Series
+df[col] = ...            # ASSIGN  — overwrite the original column with the result
+</pre>
+
+<p>Conceptually, <code>.apply()</code> is pandas' equivalent of a <code>for</code> loop over the column:</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+# What apply is doing under the hood:
+new_values = []
+for value in df[col]:
+    new_values.append(fn(value))
+df[col] = new_values
+</pre>
+
+<p>The <code>.apply()</code> form is faster (vectorized internally) and more idiomatic.</p>
+
+<h3>Why it's needed in <code>data_loader.py</code></h3>
+
+<p>When pandas saved <code>creators.csv</code>, list-typed fields like <code>niche_tags = ["pizza", "burgers"]</code> got serialized as <em>strings</em>:</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+"['pizza', 'burgers']"   ← stored in CSV as a string, not a list
+</pre>
+
+<p>Reading the CSV back gives every list column full of strings that <em>look like</em> lists but aren't. <code>_parse_list_column</code> calls <code>eval()</code> on each cell to convert the string back to a real Python list. After the apply loop, those columns hold actual <code>list</code> objects — which Pydantic accepts in <code>Creator(**row.to_dict())</code>.</p>
+
+<h3>What does <code>eval(value)</code> do?</h3>
+
+<p><code>eval()</code> takes a string of Python code and <strong>executes it as if you'd typed it into the interpreter</strong>, returning the result.</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+value = "['pizza', 'burgers']"   # a string
+result = eval(value)              # runs it as Python
+# result is now: ['pizza', 'burgers']   ← a real list
+</pre>
+
+<div style="background:#fff3cd; border-left:4px solid #f9a825; padding:10px 16px; margin:14px 0; border-radius:4px; font-size:10pt;">
+  <strong>Safety note:</strong> <code>eval()</code> will execute <em>anything</em> valid Python — including <code>__import__('os').system('rm -rf /')</code>. Safe here because we wrote the CSV ourselves. In production code, prefer <code>ast.literal_eval(value)</code>, which only parses literals (numbers, strings, lists, dicts, tuples, booleans, None) and refuses function calls or imports. Better still: store list columns as JSON and use <code>json.loads</code>.
+</div>
+
+<h3>The three branches of <code>_parse_list_column</code></h3>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+def _parse_list_column(value):
+    if pd.isna(value) or value == "":      # Case 1: missing / empty
+        return []
+    if isinstance(value, list):            # Case 2: already a list (defensive)
+        return value
+    return eval(value)                     # Case 3: string that looks like a list
+</pre>
+
+<table>
+  <thead><tr><th>Case</th><th>When it fires</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>1 — missing/empty</td><td>Cell is NaN or empty string</td><td>Return <code>[]</code> so Pydantic still gets a valid <code>list</code>; doesn't crash</td></tr>
+    <tr><td>2 — already a list</td><td>Defensive — won't fire on CSV input</td><td>Future-proof: protects against being called on a DataFrame built from JSON or constructed in memory</td></tr>
+    <tr><td>3 — string-of-a-list</td><td>The expected case after <code>read_csv</code></td><td>Convert <code>"['pizza']"</code> → <code>['pizza']</code> via eval</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Mental model:</strong> the function is a per-cell <em>type adapter</em>. Input could be missing / list / string-of-a-list; output is <em>always</em> a list. That uniformity is what lets Pydantic-based loading downstream work without further branches.</p>
+
+<p><strong>Why order matters:</strong> <code>pd.isna(value)</code> must run first. If the cell is NaN, <code>value == ""</code> returns False (NaN compares unequal to everything), <code>isinstance(NaN, list)</code> is False, so it would fall through to <code>eval(NaN)</code> — which crashes. The NaN check short-circuits before that happens.</p>
+
+<h3>pandas dtypes — and why <code>object</code> is special</h3>
+
+<p>Every column has a declared <strong>dtype</strong>:</p>
+
+<table>
+  <thead><tr><th>dtype</th><th>What it stores</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>int64</code></td><td>Integers only</td><td>Strict, fast, NumPy-backed</td></tr>
+    <tr><td><code>float64</code></td><td>Floats and NaN</td><td>Strict, fast</td></tr>
+    <tr><td><code>bool</code></td><td>True/False</td><td>Strict, fast</td></tr>
+    <tr><td><code>datetime64[ns]</code></td><td>Timestamps</td><td>Strict, fast</td></tr>
+    <tr><td><code>object</code></td><td><strong>Anything Python — strings, lists, dicts, mixed types</strong></td><td>The escape hatch — slow but flexible</td></tr>
+  </tbody>
+</table>
+
+<p>The numeric dtypes are strict and tightly stored. <code>object</code> dtype is the <strong>wildcard</strong> — each cell is just a Python pointer to any object, so one column can legally hold strings, lists, dicts, mixed types — pandas won't complain.</p>
+
+<p>That's why the apply loop in <code>data_loader.py</code> works without "changing" the column type. The column is <code>object</code> before the loop (cells are strings) and <code>object</code> after (cells are lists). Dtype unchanged; <em>per-cell type</em> changed.</p>
+
+<pre style="background:#f6f8fa; padding:12px; border-radius:4px; font-size:9.5pt;">
+df["niche_tags"].dtype                    # object
+type(df["niche_tags"].iloc[0])            # str (before apply)
+
+df["niche_tags"] = df["niche_tags"].apply(_parse_list_column)
+
+df["niche_tags"].dtype                    # object  (still!)
+type(df["niche_tags"].iloc[0])            # list    (after apply)
+</pre>
+
+<p><strong>Mental model:</strong></p>
+<ul>
+  <li><strong>Strict dtypes</strong> (int64, float64, bool, datetime64) → like a typed array. Fast, memory-efficient, restrictive.</li>
+  <li><strong><code>object</code> dtype</strong> → like a Python list of references. Slow, flexible, holds anything.</li>
+</ul>
+
+<p>Numeric/scientific code lives in strict dtypes. Real-world tabular data with messy fields (lists, dicts, mixed types) lives in <code>object</code>. <code>niche_tags</code>, <code>budget_range_per_gig</code>, and friends are all <code>object</code> columns.</p>
+
 <footer>
-  MatchScout — Project Workflow · 2026-05-09 · By Rajesh Ramani
+  MatchScout — Project Workflow · By Rajesh Ramani
 </footer>
 
 </body>

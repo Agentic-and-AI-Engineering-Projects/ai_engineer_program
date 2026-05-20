@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MatchScout — Call Flow & Data Flow</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    max-width: 1100px; margin: 0 auto; padding: 30px 40px;
+    color: #222; line-height: 1.55; background: #fafbfc;
+  }
+  header { border-bottom: 3px solid #1a4d8f; padding-bottom: 14px; margin-bottom: 24px; }
+  h1 { margin: 0; color: #1a4d8f; font-size: 24pt; }
+  .subtitle { color: #666; font-size: 11pt; margin-top: 6px; }
+  h2 {
+    color: #1a4d8f; margin-top: 34px; padding-bottom: 6px;
+    border-bottom: 2px solid #e1e7f0; font-size: 16pt;
+  }
+  p { margin: 10px 0; }
+  code {
+    background: #eef2f7; padding: 1.5px 6px; border-radius: 3px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 10pt; color: #1a4d8f;
+  }
+  pre {
+    background: #f6f8fa; border: 1px solid #e1e7f0; border-left: 4px solid #1a4d8f;
+    padding: 16px 18px; border-radius: 4px; overflow-x: auto;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 9.5pt; line-height: 1.45;
+  }
+  table {
+    border-collapse: collapse; width: 100%; margin: 14px 0;
+    background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.06); font-size: 10pt;
+  }
+  th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f0f4fa; color: #1a4d8f; font-weight: 600; }
+  td:first-child { font-family: 'SF Mono', Monaco, monospace; font-size: 9.5pt; }
+  .info {
+    background: #f0f4fa; border-left: 4px solid #1a4d8f;
+    padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 10pt;
+  }
+  .info-title { color: #1a4d8f; font-weight: 700; margin-bottom: 5px; }
+  footer { margin-top: 48px; padding-top: 14px; border-top: 1px solid #ddd; color: #888; font-size: 9pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MatchScout — Call Flow &amp; Data Flow</h1>
+  <div class="subtitle">
+    What calls what, and the input/output type at every step · Phase 2 pipeline
+  </div>
+</header>
+
+<div class="info">
+  <div class="info-title">The shape of the system</div>
+  Three stage modules (<code>filter.py</code>, <code>ranker.py</code>, <code>agent.py</code>) each do one
+  job and are independently testable. <code>pipeline.py</code> orchestrates them — it owns no matching
+  logic, it just calls the stages in order and persists the result. <code>db.py</code> and
+  <code>data_loader.py</code> are shared infrastructure.
+</div>
+
+<h2>Diagram 1 — The pipeline (the main path)</h2>
+
+<pre>
+pipeline.py  __main__  (smoke test: picks an open gig, calls down)
+      |
+      v
+recommend_creators(gig_id: str)  ----------------------->  list[CreatorRecommendation]
+      |
+      | (1) db.get_gig(gig_id)
+      |        str ------------------------------------>  Gig
+      |
+      | (2) load_creators()                      [data_loader.py - cached]
+      |        () -------------------------------------->  dict[str, Creator]   (400)
+      |
+      | (3) filter_candidates(gig, creators)     [filter.py - STAGE 1]
+      |        Gig, dict[str,Creator] ----------------->  list[Creator]        (~3-200)
+      |
+      | (4) rank_candidates(gig, candidates, 10) [ranker.py - STAGE 2]
+      |        Gig, list[Creator] ---------------------->  list[(Creator, float)]  (top 10)
+      |
+      | (5) arm = "no_llm" if random() < 0.10 else "llm"
+      |
+      | (6) run_stage3(gig, ranked, arm)         [agent.py - STAGE 3]
+      |        Gig, list[(Creator,float)], str ------->  list[CreatorRecommendation] (3)
+      |
+      | (7) db.update_gig(gig_id, treatment_arm=arm, status="in_review")
+      | (8) db.insert_recommendations(recs)
+      |
+      v
+returns list[CreatorRecommendation]   -- 3 rows, persisted to SQLite
+</pre>
+
+<h2>Diagram 2 — Inside <code>run_stage3</code> (Stage 3, the two arms)</h2>
+
+<pre>
+run_stage3(gig, ranked, arm)  --------------------------->  list[CreatorRecommendation]
+      |
+      +-- arm == "no_llm" --------------------------------------------------+
+      |     _run_no_llm_arm(gig, ranked)                                    |
+      |        take ranked[:3]  ->  3 CreatorRecommendation                 |
+      |        (reasoning=None, strengths/risks=[], cost=0)                 |
+      |                                                                     |
+      +-- arm == "llm"                                                       |
+            |                                                               |
+            | a. compute_candidate_metrics(ranked) --> list[CandidateMetrics]
+            |      per (creator, cosine):
+            |        db.recent_completed_gigs_for_creator(creator.id) --> list[Gig]
+            |        -> success% / fail% / avg_rating
+            |      _assign_ranks(metrics)   [uses _competition_rank]
+            |
+            | b. _ARM2_GRAPH.invoke({gig, metrics, ...})  [LangGraph - Diagram 3]
+            |      --> final state: { llm_response: _LLMResponse, cost: float }
+            |
+            | c. _assemble_recommendations(gig, llm_response, cost)
+            |      --> 3 CreatorRecommendation (reasoning filled, cost on rank 1)
+            |                                                               |
+            v                                                               v
+        list[CreatorRecommendation]  &lt;----------------------------------------+
+</pre>
+
+<h2>Diagram 3 — Inside <code>_ARM2_GRAPH</code> (the LangGraph state machine)</h2>
+
+<pre>
+_ARM2_GRAPH.invoke(state)
+   state = {gig, metrics, llm_response, cost, attempts, error}
+      |
+      v
++-------------------------------------------------------------+
+| NODE: call    _node_call_llm(state) -> dict                 |
+|   _build_prompt(gig, metrics) -> str                        |
+|       |- _load_prompt_template("arm2_v1")                   |
+|       |- _format_gig_brief(gig)                             |
+|       |- _format_candidates_table(metrics)                  |
+|       |- _format_recent_gigs(metrics)                       |
+|       +- _format_output_schema()                            |
+|   _call_llm(prompt) -> (_LLMResponse, float)                |
+|       |- client.messages.create(...)  -->  Claude API       |
+|       |- _extract_json(response_text) -> str                |
+|       +- _LLMResponse.model_validate_json(...)              |
++-------------------------------------------------------------+
+      |
+      v
++-------------------------------------------------------------+
+| NODE: validate   _node_validate(state) -> dict              |
+|   checks: exactly 3 recs? ranks == {1,2,3}? creator_ids known?|
+|   sets state["error"] if anything is wrong                   |
++-------------------------------------------------------------+
+      |
+      v
+_route_after_validate(state) -> "retry" | "done"
+      |
+      +- "retry"  (error set AND attempts < 3)  ------>  back to NODE: call
+      +- "done"                                  ------>  END
+</pre>
+
+<h2>Function signature table (input &rarr; output)</h2>
+
+<table>
+  <thead><tr><th>Function</th><th>Module</th><th>Input</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td>recommend_creators</td><td>pipeline</td><td>gig_id: str</td><td>list[CreatorRecommendation]</td></tr>
+    <tr><td>filter_candidates</td><td>filter</td><td>gig: Gig, creators: dict[str,Creator]</td><td>list[Creator]</td></tr>
+    <tr><td>rank_candidates</td><td>ranker</td><td>gig: Gig, candidates: list[Creator], top_k=10</td><td>list[(Creator, float)]</td></tr>
+    <tr><td>run_stage3</td><td>agent</td><td>gig: Gig, ranked: list[(Creator,float)], arm: str</td><td>list[CreatorRecommendation]</td></tr>
+    <tr><td>compute_candidate_metrics</td><td>agent</td><td>ranked: list[(Creator,float)]</td><td>list[CandidateMetrics]</td></tr>
+    <tr><td>_call_llm</td><td>agent</td><td>prompt: str</td><td>(_LLMResponse, float)</td></tr>
+    <tr><td>db.get_gig</td><td>db</td><td>gig_id: str</td><td>Gig or None</td></tr>
+    <tr><td>db.recent_completed_gigs_for_creator</td><td>db</td><td>creator_id: str, limit=10</td><td>list[Gig]</td></tr>
+    <tr><td>db.update_gig</td><td>db</td><td>gig_id: str, **fields</td><td>None (writes)</td></tr>
+    <tr><td>db.insert_recommendations</td><td>db</td><td>recs: list[CreatorRecommendation]</td><td>None (writes)</td></tr>
+    <tr><td>load_creators / load_businesses</td><td>data_loader</td><td>()</td><td>dict[str, Creator] / dict[str, Business]</td></tr>
+  </tbody>
+</table>
+
+<h2>How the smoke tests fit</h2>
+
+<p>Each module has an <code>if __name__ == "__main__"</code> block that exercises just that stage,
+so any one can be run in isolation. Each re-runs the earlier stages to build its own input —
+that is why <code>agent.py</code>'s smoke test calls <code>filter_candidates</code> and
+<code>rank_candidates</code> first.</p>
+
+<table>
+  <thead><tr><th>Command</th><th>Tests</th></tr></thead>
+  <tbody>
+    <tr><td>python -m matchscout.filter</td><td>Stage 1 alone</td></tr>
+    <tr><td>python -m matchscout.ranker</td><td>Stage 1 → Stage 2</td></tr>
+    <tr><td>python -m matchscout.agent</td><td>Stage 1 → 2 → 3 (both arms)</td></tr>
+    <tr><td>python -m matchscout.pipeline</td><td>the whole chain + DB writes</td></tr>
+  </tbody>
+</table>
+
+<h2>The only side effects (writes)</h2>
+
+<p>Every function is pure — returns a value, no writes — <strong>except</strong> the two
+<code>db.*</code> calls at the end of <code>recommend_creators</code>:</p>
+<ul>
+  <li><code>db.update_gig</code> — flips the gig to <code>in_review</code> and records the treatment arm</li>
+  <li><code>db.insert_recommendations</code> — writes the 3 recommendation rows</li>
+</ul>
+<p>Stages 1, 2, and 3 never touch the database. The pipeline is the single place results are persisted.</p>
+
+<footer>
+  MatchScout — Call Flow &amp; Data Flow · Phase 2 · By Rajesh Ramani
+</footer>
+
+</body>
+</html>

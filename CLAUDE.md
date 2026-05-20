@@ -26,7 +26,15 @@ No passive video courses — learning by doing, with deeplearning.ai shorts on-d
 - Activate: source .venv/bin/activate
 - Keys: copy .env.example to .env, add ANTHROPIC_API_KEY etc.
 
-## The 14-Project Curriculum (v6 — updated 2026-04-29)
+## The 15-Project Curriculum (v8 — refreshed 2026-05-13 for frontier coverage)
+
+### v8 Changes (driven by 2026 frontier agent stack)
+- **P9 expanded + pinned to MatchScout V2** (refined 2026-05-13): 4-framework memory benchmark (Zep + Mem0 + Anthropic Memory tool + Letta) on MatchScout V2's actual memory workload — distilled business prefs + creator personas + pattern memory + reflexion memory + LLM bypass. ~78% input-token reduction over V1.
+- **P12 expanded**: + Claude Agent SDK + OpenAI Agents SDK to the framework comparison (now 5 frameworks)
+- **P13 (v8.2 refined 2026-05-13)**: Pinned to MatchScout V2. Agent SDK rebuild of Stage 3 with subagents (history/reasoner/fact-checker/critic). Memory + subagents work multiplicatively for V2.
+
+### v7 Changes (locked 2026-05-10)
+- **P7 pivoted**: ChurnGuard → MatchScout (Onemyle marketplace PoC, gig-driven recommender)
 
 ### v6 Changes (driven by real Oracle/Salesforce/Adobe/Airwallex job postings)
 - **P7 expanded**: + Ragas, DeepEval, Promptfoo eval frameworks (#79)
@@ -46,12 +54,13 @@ Uses Faker for synthetic customer data. Connects naturally to Onemyle's real wor
 | P4 | p4_stocksage | StockSage — stock analysis agent | Multi-agent, Mem0 memory, reasoning model selection | #29–33 | 2 |
 | P5 | p5_reviewcrew | ReviewCrew — GitHub PR reviewer | CrewAI, parallel execution, hierarchical agents | #34–36 | 3 |
 | P6 | p6_mcp | MCP++ + A2A — Onemyle MCP server | MCP spec, streamable-http, OAuth 2.1, A2A protocol | #37–39, #73 | 3 |
-| P7 | matchscout-onemyle | **MatchScout — Onemyle Marketplace PoC** (replaces ChurnGuard) | 3-stage cascade (rules + vector + LLM), LangGraph, sentence-transformers, Ragas, DeepEval, Promptfoo, LangSmith, LangFuse | #87 (replaces #40-42, #79) | 3 |
+| P7 | matchscout-onemyle | **MatchScout — Onemyle Marketplace PoC** (gig-driven recommender, two-arm outcome A/B) | 3 stages × 2 arms (rules + vector cosine + LLM re-ranker on top 10), Gig + CreatorRecommendation entities, SQLite, Streamlit dashboard, LangGraph, sentence-transformers, versioned prompt templates, scipy chi-squared, Ragas/DeepEval/Promptfoo/LangSmith/LangFuse as dev-time tools (no CI eval gate), pytest schema smoke test | #87 (replaces #40-42, #79) | 3 |
 | P8 | p8_security | PII Compliance Agent — agent security | OWASP LLM Top 10, PII detection, NeMo Guardrails | #48 | 3 |
-| P9 | p9_memory | Account Memory Agent — long-term memory | Zep (Graphiti), Mem0, temporal knowledge graphs | #49 | 3–4 |
+| P9 | p9_memory | **MatchScout V2 memory layer** — 4-framework benchmark (Zep + Mem0 + Anthropic Memory tool + Letta) on MatchScout's actual memory workload | Distilled business preferences, creator personas, pattern memory, reflexion memory, LLM bypass. ~78% input-token reduction vs V1. | #49 | 3–4 |
 | P10 | p10_platform | AgentPlatform — production deploy | Docker, k3s, GitHub Actions, AWS Bedrock, Terraform, **FastAPI, Pinecone, multi-cloud routing, reliability patterns, cost tracking** | #43–45, **#74–78** | 4 |
 | P11 | p11_multimodal | Contract & Invoice Analyzer — vision | Claude vision, PyMuPDF, multi-modal RAG, GPT-4o | #50 | 4 |
-| **P12 NEW** | p12_framework_showdown | Multi-agent framework comparison | **AutoGen vs LangGraph vs CrewAI**, comparison blog | **#80** | 4 |
+| **P13** | p13_matchscout_v2_agentsdk | **MatchScout V2 — Agent SDK rebuild of Stage 3** (subagents + Anthropic Memory tool + Reflexion) — pinned to MatchScout V2, not academic research bot | Claude Agent SDK, subagents (history/reasoner/fact-checker/critic), Anthropic Memory tool, Reflexion. Inline hallucination guard via fact-checker subagent. | #88 | 4 |
+| P12 (expanded) | p12_framework_showdown | Multi-agent framework comparison (5 frameworks) | **AutoGen + LangGraph + CrewAI + Claude Agent SDK + OpenAI Agents SDK**, comparison blog | **#80** | 4 |
 
 ## Supplementary Tickets (non-blocking)
 - #67 — Raw ReAct Loop (react_agent.py)
@@ -68,12 +77,13 @@ Uses Faker for synthetic customer data. Connects naturally to Onemyle's real wor
 - P4: multi-tool orchestration, structured output, domain RAG, agent synthesis, financial APIs
 - P5: CrewAI agents/tasks/crew, agent specialization, parallel execution, hierarchical agents
 - P6: MCP spec, streamable-http transport, tool schemas, resource protocol, OAuth 2.1, A2A protocol
-- P7 (MatchScout — Onemyle PoC): **3-stage cascade architecture (rules filter → vector similarity → LLM agent)**, LangGraph state machine, sentence-transformers for embeddings/vector ranking, Faker for synthetic marketplace data, LangSmith tracing, LangFuse dashboards, **Ragas (faithfulness/groundedness), DeepEval (LLM unit tests), Promptfoo (A/B testing), regression suite gating CI**, two-sided marketplace product thinking, category taxonomy + adjacency design, cold-start awareness, marketplace fairness considerations
+- P7 (MatchScout — Onemyle PoC, gig-driven recommender): **gig-driven 3-stage pipeline × 2-arm outcome A/B** (Arm 1 = 10% no-LLM control taking top 3 by cosine; Arm 2 = 90% LLM ranks top 3 from top 10 using a versioned prompt template + past-gig metrics). Stage 1 rules = location · budget · content_type overlap. Stage 2 vector cosine over (niche_tags + profile_description + categories + subcategories). Stage 3 = LangGraph state machine with single versioned prompt. Profile descriptions are stored fields (Instagram-bio style), synthesized via Claude one-time. Storage: CSV for catalog, SQLite for gigs/recommendations/past_gigs. Streamlit dashboard with chi-squared significance. Eval is **outcome-based only** — no synthetic golden set, no CI quality gate (pytest schema smoke test only). Ragas/DeepEval/Promptfoo are **dev-time tools** for prompt iteration, not CI blockers. LangSmith tracing per recommendation, LangFuse rolling dashboards. Versioned prompt templates (prompts/arm2_v1.txt) with `prompt_version` stamped on each recommendation — enables A/B-ing prompts against outcomes. Two-sided marketplace product thinking, treatment-arm experimental design, statistical significance reasoning, prompt-as-tuning-surface, gig-as-unit-of-work primitive
 - P8: OWASP LLM Top 10, PII detection, prompt injection blocking, NeMo Guardrails, audit trails
-- P9: Zep temporal knowledge graphs, Mem0 semantic facts, LongMemEval benchmark comparison
+- P9 (v8.1 refined 2026-05-13): **MatchScout V2 memory layer — 4-framework benchmark on MatchScout's actual workload.** V1 re-feeds raw past-gig history every recommendation (~5K tokens/gig). V2 introduces a memory layer: distilled business preferences ("biz_042 rejects >100K followers"), distilled creator personas ("creator_017 reliable, 8/10 successful"), pattern memory ("Italian fine-dining + natural_lighting tag → 87% success"), reflexion memory (LLM's self-critiques as guardrails), and LLM bypass for high-confidence memory consensus. Same workload implemented with all 4 frameworks: (1) Zep/Graphiti temporal graphs, (2) Mem0 semantic facts, (3) Anthropic Memory tool native primitive, (4) Letta virtual context management. Measured on real MatchScout V1 outcome data — recall accuracy, latency, cost-per-gig, persistence at scale, cold-start handling. Expected gains: ~78% input-token reduction, ~73% LLM-cost reduction, ~50% latency reduction. End artifact: memory framework recommendation for MatchScout V2 + comparison blog.
 - P10: Docker multi-stage builds, k8s manifests, secrets management, GitHub Actions CI/CD, Bedrock, **FastAPI + SSE streaming, Pinecone migration from Chroma, multi-cloud LLM routing (Bedrock + Azure OpenAI + GCP Vertex), reliability patterns (tenacity exponential backoff, pybreaker circuit breaker, automatic provider fallback), per-request token + USD cost tracking with budget alerts**
 - P11: PyMuPDF page rendering, Claude vision API, base64 image content blocks, multi-modal RAG
-- **P12: AutoGen conversational multi-agent pattern, framework comparison methodology (LoC, latency, cost, debuggability), technical writing for LinkedIn**
+- **P13 (v8.2 refined 2026-05-13): MatchScout V2 — Agent SDK rebuild of Stage 3.** Replaces V1's single LangGraph LLM call with a subagent decomposition: (1) history/context subagent reads from P9's memory layer, (2) reasoner subagent picks top 3, (3) **fact-checker subagent catches hallucinations inline** (validates cited past_gigs exist in DB before emitting), (4) critic subagent (Reflexion) reviews + writes self-critiques into reflexion memory. Memory + subagents are multiplicative: memory makes subagents affordable (each reads compact slice ~400 tokens), subagents target memory access. Net V2 (memory + subagents) vs V1: similar cost (5 calls × small context ≈ 1 call × big context), materially better quality (inline fact-check + Reflexion + personalization). Same domain as P7/P9 → coherent portfolio: one product, two technical investigations for V2.
+- **P12 (expanded v8): 5-framework agent showdown** — AutoGen + LangGraph + CrewAI + Claude Agent SDK + OpenAI Agents SDK. Build the same simple task agent (research a topic, return a sourced summary) in all 5. Measure: LoC, latency, cost per task, debuggability, dev ergonomics. End artifact: comparison table + LinkedIn-ready technical blog ranking the frameworks for different use cases.
 
 ## P7 → MatchScout Pivot (2026-05-09)
 
@@ -86,15 +96,26 @@ an angel investor + pro bono Product/AI Lead).
 MatchScout is a formal Onemyle initiative — credible, real, defensible in
 interviews. Same technical learning + marketplace AI patterns added.
 
-**MatchScout = AI match-quality predictor for Onemyle's two-sided marketplace** (creators ↔ local businesses). 3-stage cascade architecture (rules filter → vector similarity → LLM agent) covering everything ChurnGuard would have taught, plus marketplace AI patterns.
+**MatchScout = gig-driven AI recommender for Onemyle's two-sided marketplace** (creators ↔ local businesses). When a business posts a gig and clicks "Recommend Creators" (PoC: `python recommend_creators.py --gig-id GIG_ID`), the system surfaces the top 3 creators. 10% of gigs go through a no-LLM control path; 90% go through an LLM re-ranker that reasons over each candidate's past-gig metrics. Outcome A/B measures whether the LLM beats the baseline.
 
 **Status:** PoC. Synthetic data. Productionization pending Onemyle roadmap.
 
 **Replaces:** P7 #40, #41, #42, #79 (those tickets superseded). PM artifact ticket (was #81) is incorporated into MatchScout deliverables.
 
-**New ticket:** #87 — MatchScout — Onemyle Marketplace PoC.
+**Ticket:** #87 — MatchScout — Onemyle Marketplace PoC.
 
-**Design doc:** `matchscout-onemyle/DESIGN.html` (architecture, data flow, runtime model)
+**Design doc:** `matchscout-onemyle/DESIGN.html` (architecture, data flow, two-arm outcome eval)
+**Operating doc:** `matchscout-onemyle/project_workflow.html` (phase-by-phase plan + remediation appendix)
+**Interview pitch:** `matchscout-onemyle/pm/interview_pitch.md` (cheat sheet for live interviews)
+
+### P7 design summary
+
+- **Entities:** Creator + Business (CSV catalog) · Gig + CreatorRecommendation + PastGig (SQLite)
+- **Stages:** Stage 1 hard filter (location · budget · content_type) → Stage 2 vector cosine on (niche_tags + profile_description + categories + subcategories) → Stage 3 arm-routed: Arm 1 (10% control) takes top 3 by cosine; Arm 2 (90%) LLM picks top 3 from top 10 using past-gig metrics + versioned prompt template
+- **Prompt as tuning surface:** versioned template files (`prompts/arm2_v1.txt`, ...). `prompt_version` stamped on every recommendation. Outcome dashboard segments metrics by prompt version. Iteration is empirically driven.
+- **Storage:** SQLite for gigs/recommendations/past_gigs (joinable, queryable, VS Code SQLite Viewer for inspection). CSVs for immutable catalog.
+- **Dashboard:** Streamlit, two-arm side-by-side with chi-squared significance, drill-down to LangSmith traces.
+- **Eval:** outcome-based only. NO synthetic golden set. NO CI quality gate. CI = pytest schema smoke test only. Ragas/DeepEval/Promptfoo are dev-time tools used during prompt iteration, not blockers.
 
 ## Path B — AI Product Management Track (added 2026-05-01)
 
