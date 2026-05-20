@@ -1,0 +1,34 @@
+name: MatchScout smoke test
+
+on:
+  push:
+    paths:
+      - "matchscout-onemyle/**"
+      - ".github/workflows/smoke.yml"
+  pull_request:
+    paths:
+      - "matchscout-onemyle/**"
+      - ".github/workflows/smoke.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: matchscout-onemyle
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Seed the database
+        run: python -m data.seed_db
+
+      - name: Run smoke test
+        run: pytest matchscout/tests/ -v
