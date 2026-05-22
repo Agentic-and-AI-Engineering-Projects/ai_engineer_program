@@ -63,11 +63,11 @@
   }
 
   .timeline-overview {
-    background: linear-gradient(90deg, #28a745 0%, #28a745 50%, #f9a825 50%, #f9a825 58%, #ddd 58%, #ddd 100%);
+    background: linear-gradient(90deg, #28a745 0%, #28a745 70%, #f9a825 70%, #f9a825 78%, #ddd 78%, #ddd 100%);
     height: 30px; border-radius: 4px; margin: 18px 0; position: relative;
   }
   .timeline-overview::after {
-    content: 'Phase 0-2 complete · Phase 3 next · Phases 4-8 pending';
+    content: 'Phase 0-4 complete · Phase 5 next · Phases 6-8 pending';
     position: absolute; left: 50%; transform: translateX(-50%);
     top: 7px; color: #222; font-size: 10pt; font-weight: 600;
   }
@@ -95,9 +95,9 @@
     <tr><td>Phase 1 — Synthetic catalog (creators + businesses)</td><td>✅ Done</td><td>1 day</td></tr>
     <tr><td>Phase 1.5 — Profile descriptions + Gig + SQLite</td><td>✅ Done</td><td>0.5 day</td></tr>
     <tr><td>Phase 2 — Recommender pipeline (3 stages × 2 arms)</td><td>✅ Done</td><td>3-4 days</td></tr>
-    <tr><td><strong>Phase 3 — CI smoke test only</strong></td><td>🟡 Next</td><td>0.5 day</td></tr>
-    <tr><td>Phase 4 — Outcome dashboard + prompt iteration loop</td><td>⏳ Pending</td><td>1-2 days</td></tr>
-    <tr><td>Phase 5 — Observability wiring (LangSmith + LangFuse)</td><td>⏳ Pending</td><td>1 day</td></tr>
+    <tr><td>Phase 3 — CI smoke test only</td><td>✅ Done</td><td>0.5 day</td></tr>
+    <tr><td>Phase 4 — Outcome dashboard + prompt iteration loop</td><td>✅ Done</td><td>1-2 days</td></tr>
+    <tr><td><strong>Phase 5 — Observability wiring (LangSmith + LangFuse)</strong></td><td>🟡 Next</td><td>1 day</td></tr>
     <tr><td>Phase 6 — PM artifacts</td><td>⏳ Pending</td><td>2 days</td></tr>
     <tr><td>Phase 7 — Polish + documentation</td><td>⏳ Pending</td><td>1 day</td></tr>
     <tr><td>Phase 8 — Onemyle review</td><td>⏳ Pending</td><td>~1 week</td></tr>
@@ -216,10 +216,10 @@
 <div class="arrow">▼</div>
 
 <!-- ====================================================================== -->
-<div class="phase active">
+<div class="phase">
   <div class="phase-header">
     <span class="phase-title">Phase 3 — CI smoke test only</span>
-    <span class="phase-status status-active">Next</span>
+    <span class="phase-status status-done">Done</span>
   </div>
   <div class="phase-meta">~0.5 day · Goal: catch broken code, not bad LLM output</div>
 
@@ -239,10 +239,10 @@
 <div class="arrow">▼</div>
 
 <!-- ====================================================================== -->
-<div class="phase future">
+<div class="phase done">
   <div class="phase-header">
     <span class="phase-title">Phase 4 — Outcome dashboard + prompt iteration loop</span>
-    <span class="phase-status status-future">Pending</span>
+    <span class="phase-status status-done">Done</span>
   </div>
   <div class="phase-meta">~1-2 days · Goal: causal measurement of LLM lift + closed-loop prompt iteration</div>
 
@@ -263,10 +263,10 @@
 
 <div class="arrow">▼</div>
 
-<div class="phase future">
+<div class="phase active">
   <div class="phase-header">
     <span class="phase-title">Phase 5 — Observability wiring (LangSmith + LangFuse)</span>
-    <span class="phase-status status-future">Pending</span>
+    <span class="phase-status status-active">Next</span>
   </div>
   <div class="phase-meta">~1 day · Goal: traceable, debuggable, cost-monitored recommendations</div>
 

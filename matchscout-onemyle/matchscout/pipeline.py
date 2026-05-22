@@ -41,7 +41,7 @@ from matchscout.agent import (
 )
 
 # Fraction of gigs routed to the no-LLM control arm — the A/B coin flip.
-CONTROL_FRACTION = 0.10
+CONTROL_FRACTION = 0.50
 # How many times Arm 2 will re-call the LLM if validation fails.
 MAX_LLM_ATTEMPTS = 3
 
