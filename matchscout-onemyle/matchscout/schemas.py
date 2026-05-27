@@ -119,3 +119,9 @@ class CreatorRecommendation(BaseModel):
     key_signals: list[str] = []                # cited facts (e.g., "successful_gigs=8")
     generated_at: datetime
     cost_usd: float = 0.0
+    # Observability — populated by Stage 3 LLM call (Arm 2). Null for Arm 1.
+    # All 3 rec rows from a single LLM call share the same trace_id + URLs.
+    trace_id: Optional[str] = None       # UUID; identifies the call across both backends
+    langsmith_url: Optional[str] = None  # Per-trace inspector URL (LangSmith UI)
+    langfuse_url: Optional[str] = None   # Per-trace inspector URL (LangFuse UI)
+

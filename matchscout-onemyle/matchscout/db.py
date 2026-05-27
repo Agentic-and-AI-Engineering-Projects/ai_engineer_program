@@ -43,6 +43,15 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+def _migrate_add_trace_columns(conn: sqlite3.Connection) -> None:
+    """One-shot: add trace_id + langsmith_url + langfuse_url to existing
+    recommendations tables. Idempotent — skips columns that already exist.
+    """
+    # PRAGMA table_info returns one row per column; col[1] is the column name.
+    existing = {col[1] for col in conn.execute("PRAGMA table_info(recommendations)")}
+    for col in ("trace_id", "langsmith_url", "langfuse_url"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE recommendations ADD COLUMN {col} TEXT")
 
 def init_schema() -> None:
     """Create tables + indexes if they don't exist. Idempotent."""
@@ -86,11 +95,17 @@ def init_schema() -> None:
             key_signals TEXT NOT NULL DEFAULT '[]',
             generated_at TEXT NOT NULL,
             cost_usd REAL NOT NULL DEFAULT 0,
+            trace_id TEXT,
+            langsmith_url TEXT,
+            langfuse_url TEXT,
             FOREIGN KEY (gig_id) REFERENCES gigs(id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_recs_gig ON recommendations(gig_id);
     """)
+
+    _migrate_add_trace_columns(conn)   # <-- ADD THIS LINE
+
     conn.commit()
     conn.close()
 
@@ -161,7 +176,11 @@ def _rec_to_row(r: CreatorRecommendation) -> dict:
         "key_signals": json.dumps(r.key_signals),
         "generated_at": r.generated_at.isoformat(),
         "cost_usd": r.cost_usd,
+        "trace_id": r.trace_id,
+        "langsmith_url": r.langsmith_url,
+        "langfuse_url": r.langfuse_url,
     }
+
 
 
 # ============================================================

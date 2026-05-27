@@ -19,6 +19,7 @@ from matchscout.schemas import Gig, Creator
 from matchscout import db
 
 
+
 # ============================================================
 # 2.3a — per-candidate metrics
 # ============================================================
@@ -240,6 +241,8 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
 # Load ANTHROPIC_API_KEY (and MATCHSCOUT_* settings) from the project .env.
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -287,9 +290,20 @@ def _extract_json(text: str) -> str:
     return text[start : end + 1]
 
 
-def call_llm(prompt: str) -> tuple[_LLMResponse, float]:
-    """Send the assembled prompt to Claude; return the parsed recommendations
-    and the dollar cost of the call.
+@traceable(name="matchscout_call_llm", run_type="llm")
+def call_llm(
+    prompt: str, gig_id: str, prompt_version: str
+) -> tuple[_LLMResponse, float, str | None, str | None]:
+    """Send the assembled prompt to Claude; return the parsed recommendations,
+    the dollar cost, plus the LangSmith trace_id + URL for this call.
+
+    The @traceable decorator auto-captures inputs (prompt, gig_id,
+    prompt_version), output, latency, and a trace UUID, and ships them to
+    LangSmith. We then read the trace's UUID + URL back so they can be
+    persisted on the rec rows for dashboard drill-down.
+
+    trace_id and langsmith_url will be None if LANGSMITH_TRACING is unset
+    (e.g. when the CI smoke test runs without API keys).
     """
     # One Messages API call — the prompt already carries all instructions.
     response = _client.messages.create(
@@ -305,10 +319,22 @@ def call_llm(prompt: str) -> tuple[_LLMResponse, float]:
         + usage.output_tokens / 1_000_000 * _OUTPUT_COST_PER_MTOK
     )
 
-    # The reply is a single text block — extract, parse, and validate the JSON.
+    # Parse the JSON the model returned.
     raw_text = response.content[0].text
     parsed = _LLMResponse.model_validate_json(_extract_json(raw_text))
-    return parsed, cost
+
+    # Reach into the active trace to pull its identity + inspector URL.
+    # Returns None when tracing is disabled (no API key / env var off).
+    run = get_current_run_tree()
+    if run is not None:
+        trace_id = str(run.id)
+        langsmith_url = run.get_url()
+    else:
+        trace_id = None
+        langsmith_url = None
+
+    return parsed, cost, trace_id, langsmith_url
+
 
 # ============================================================
 # 2.3d — recommendation builders + LLM-output validation
@@ -346,11 +372,22 @@ def validate_llm_response(
 
 
 def assemble_recommendations(
-    gig: Gig, llm_response: _LLMResponse, cost: float
+    gig: Gig,
+    llm_response: _LLMResponse,
+    cost: float,
+    trace_id: str | None,
+    langsmith_url: str | None,
 ) -> list[CreatorRecommendation]:
     """Turn the validated LLM output into stored CreatorRecommendation objects,
-    adding the system fields the LLM doesn't produce. The whole call cost is
-    attributed to the rank-1 row, so a gig's three rows sum to its true cost."""
+    adding the system fields the LLM doesn't produce.
+
+    Attribution:
+      - cost_usd : whole call cost on the rank-1 row, 0 on the others
+                   (so SUM(cost_usd) per gig = the gig's true cost)
+      - trace_id / langsmith_url : same value on ALL 3 rows
+                   (one trace serves all 3 picks; dashboard renders a
+                   per-row "View trace" link without needing a JOIN)
+    """
     recs = []
     for i, llm_rec in enumerate(llm_response.recommendations):
         recs.append(CreatorRecommendation(
@@ -366,8 +403,11 @@ def assemble_recommendations(
             key_signals=llm_rec.key_signals,
             generated_at=datetime.now(),
             cost_usd=cost if i == 0 else 0.0,
+            trace_id=trace_id,
+            langsmith_url=langsmith_url,
         ))
     return recs
+
 
 
 def build_no_llm_recommendations(

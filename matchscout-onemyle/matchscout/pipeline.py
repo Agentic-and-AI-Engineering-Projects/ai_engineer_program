@@ -38,7 +38,9 @@ from matchscout.agent import (
     validate_llm_response,
     assemble_recommendations,
     build_no_llm_recommendations,
+    PROMPT_VERSION,
 )
+
 
 # Fraction of gigs routed to the no-LLM control arm — the A/B coin flip.
 CONTROL_FRACTION = 0.50
@@ -60,6 +62,8 @@ class PipelineState(TypedDict):
     metrics: list                 # list[CandidateMetrics] — Arm 2 only
     llm_response: object          # _LLMResponse | None — Arm 2 only
     cost: float                   # accumulated LLM cost for this gig
+    trace_id: Optional[str]       # LangSmith trace UUID — set by _node_arm2_call
+    langsmith_url: Optional[str]  # LangSmith inspector URL — set by _node_arm
     attempts: int                 # Arm 2 LLM call attempts so far
     error: Optional[str]          # set when a step fails
     recommendations: list         # list[CreatorRecommendation] — final output
@@ -95,17 +99,30 @@ def _node_arm2_metrics(state: PipelineState) -> dict:
 
 def _node_arm2_call(state: PipelineState) -> dict:
     """Arm 2 — build the prompt and call Claude. On failure, record the
-    error so the validate node can route to a retry."""
+    error so the validate node can route to a retry.
+
+    cost accumulates across retries (we pay for every attempt). trace_id /
+    langsmith_url are replaced each call — we only care about the most recent
+    one (the successful call's trace, or the last failure's if we give up).
+    """
     attempt = state["attempts"] + 1
     try:
-        parsed, call_cost = call_llm(build_prompt(state["gig"], state["metrics"]))
+        parsed, call_cost, trace_id, langsmith_url = call_llm(
+            build_prompt(state["gig"], state["metrics"]),
+            gig_id=state["gig"].id,
+            prompt_version=PROMPT_VERSION,
+        )
         return {
             "llm_response": parsed,
             "cost": state["cost"] + call_cost,
+            "trace_id": trace_id,
+            "langsmith_url": langsmith_url,
             "attempts": attempt,
             "error": None,
         }
     except Exception as exc:
+        # Trace info stays at whatever state had before — if the first attempt
+        # crashes before LangSmith records anything, both stay None.
         return {"llm_response": None, "attempts": attempt, "error": str(exc)}
 
 def _node_arm2_validate(state: PipelineState) -> dict:
@@ -117,11 +134,18 @@ def _node_arm2_validate(state: PipelineState) -> dict:
     return {"error": err}
 
 def _node_arm2_assemble(state: PipelineState) -> dict:
-    """Arm 2 — turn the validated LLM response into recommendation rows."""
+    """Arm 2 — turn the validated LLM response into recommendation rows.
+    Reads trace identity out of state (set by _node_arm2_call) and threads
+    it through so all 3 rows carry the same trace_id + URL."""
     recs = assemble_recommendations(
-        state["gig"], state["llm_response"], state["cost"]
+        state["gig"],
+        state["llm_response"],
+        state["cost"],
+        state["trace_id"],
+        state["langsmith_url"],
     )
     return {"recommendations": recs}
+
 
 def _node_persist_recommendations(state: PipelineState) -> dict:
     """Write the 3 recommendations to SQLite and advance the gig to
@@ -230,10 +254,13 @@ def recommend_creators(gig_id: str) -> list[CreatorRecommendation]:
         "metrics": [],
         "llm_response": None,
         "cost": 0.0,
+        "trace_id": None,
+        "langsmith_url": None,
         "attempts": 0,
         "error": None,
         "recommendations": [],
     }
+
 
     # Run the graph end-to-end.
     final = _PIPELINE_GRAPH.invoke(initial)
