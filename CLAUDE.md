@@ -54,7 +54,7 @@ Uses Faker for synthetic customer data. Connects naturally to Onemyle's real wor
 | P4 | p4_stocksage | StockSage — stock analysis agent | Multi-agent, Mem0 memory, reasoning model selection | #29–33 | 2 |
 | P5 | p5_reviewcrew | ReviewCrew — GitHub PR reviewer | CrewAI, parallel execution, hierarchical agents | #34–36 | 3 |
 | P6 | p6_mcp | MCP++ + A2A — Onemyle MCP server | MCP spec, streamable-http, OAuth 2.1, A2A protocol | #37–39, #73 | 3 |
-| P7 | matchscout-onemyle | **MatchScout — Onemyle Marketplace PoC** (gig-driven recommender, two-arm outcome A/B) | 3 stages × 2 arms (rules + vector cosine + LLM re-ranker on top 10), Gig + CreatorRecommendation entities, SQLite, Streamlit dashboard, LangGraph, sentence-transformers, versioned prompt templates, scipy chi-squared, Ragas/DeepEval/Promptfoo/LangSmith/LangFuse as dev-time tools (no CI eval gate), pytest schema smoke test | #87 (replaces #40-42, #79) | 3 |
+| P7 | [Onemyle-matchscout](https://github.com/rrvenkatrama/Onemyle-matchscout) (separate repo since 2026-06-08) | **MatchScout — Onemyle Marketplace PoC** (gig-driven recommender, two-arm outcome A/B) | 3 stages × 2 arms (rules + vector cosine + LLM re-ranker on top 10), Gig + CreatorRecommendation entities, SQLite, Streamlit dashboard, LangGraph, sentence-transformers, versioned prompt templates, scipy chi-squared, Ragas/DeepEval/Promptfoo/LangSmith/LangFuse as dev-time tools (no CI eval gate), pytest schema smoke test | #87 (replaces #40-42, #79) | 3 |
 | P8 | p8_security | PII Compliance Agent — agent security | OWASP LLM Top 10, PII detection, NeMo Guardrails | #48 | 3 |
 | P9 | p9_memory | **MatchScout V2 memory layer** — 4-framework benchmark (Zep + Mem0 + Anthropic Memory tool + Letta) on MatchScout's actual memory workload | Distilled business preferences, creator personas, pattern memory, reflexion memory, LLM bypass. ~78% input-token reduction vs V1. | #49 | 3–4 |
 | P10 | p10_platform | AgentPlatform — production deploy | Docker, k3s, GitHub Actions, AWS Bedrock, Terraform, **FastAPI, Pinecone, multi-cloud routing, reliability patterns, cost tracking** | #43–45, **#74–78** | 4 |
@@ -106,9 +106,10 @@ interviews. Same technical learning + marketplace AI patterns added.
 
 **Ticket:** #87 — MatchScout — Onemyle Marketplace PoC.
 
-**Design doc:** `matchscout-onemyle/DESIGN.html` (architecture, data flow, two-arm outcome eval)
-**Operating doc:** `matchscout-onemyle/project_workflow.html` (phase-by-phase plan + remediation appendix)
-**Interview pitch:** `matchscout-onemyle/pm/interview_pitch.md` (cheat sheet for live interviews)
+**Repository:** https://github.com/rrvenkatrama/Onemyle-matchscout (split out of this repo on 2026-06-08; local clone at `~/ai/Onemyle-matchscout/`)
+**Design doc:** [DESIGN.html](https://github.com/rrvenkatrama/Onemyle-matchscout/blob/main/DESIGN.html) (architecture, data flow, two-arm outcome eval)
+**Operating doc:** [project_workflow.html](https://github.com/rrvenkatrama/Onemyle-matchscout/blob/main/project_workflow.html) (phase-by-phase plan + remediation appendix)
+**Interview pitch:** [pm/interview_pitch.md](https://github.com/rrvenkatrama/Onemyle-matchscout/blob/main/pm/interview_pitch.md) (cheat sheet for live interviews)
 
 ### P7 design summary
 
