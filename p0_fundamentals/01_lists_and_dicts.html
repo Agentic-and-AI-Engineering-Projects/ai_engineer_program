@@ -290,6 +290,40 @@ prices.get("AAPL")                # returns None if missing
 prices.get("UNKNOWN", "N/A")      # default value if missing
 "AAPL" in prices                  # True / False</code></pre>
 
+<div class="gotcha">
+  <div class="gotcha-title">⚠️ <code>in</code> is O(1) on a dict, O(n) on a list — same keyword, very different cost</div>
+  <p>The <code>in</code> operator dispatches to the container's membership protocol, and the complexity depends entirely on the right-hand-side type. This is the #1 misread of code like LeetCode two_sum.</p>
+  <table>
+    <thead><tr><th>RHS type</th><th>What <code>x in container</code> does</th><th>Complexity</th></tr></thead>
+    <tbody>
+      <tr><td><code>list</code> / <code>tuple</code></td><td>Walks the sequence element by element</td><td><strong>O(n)</strong></td></tr>
+      <tr><td><code>set</code></td><td>Hashes <code>x</code>, jumps to that bucket, checks equality</td><td><strong>O(1) avg</strong></td></tr>
+      <tr><td><code>dict</code></td><td>Hashes <code>x</code>, jumps to that bucket, checks <strong>key</strong> equality (not value)</td><td><strong>O(1) avg</strong></td></tr>
+    </tbody>
+  </table>
+  <p><strong>Why LeetCode two_sum is O(n), not O(n²):</strong></p>
+  <pre><code>seen = {}                             # dict — hash table
+for i, num in enumerate(nums):
+    if target - num in seen:          # O(1) avg — hash lookup, NOT a scan
+        return [seen[target - num], i]
+    seen[num] = i                     # O(1) avg insert</code></pre>
+  <p>Outer loop n iterations × O(1) work per iteration = <strong>O(n) overall</strong>. A dict lookup is not a search; it is an address computation: <code>hash(key) → bucket index → direct probe</code>.</p>
+  <p>The version that <em>would</em> be O(n²) checks against the original list:</p>
+  <pre><code>for i, num in enumerate(nums):
+    if target - num in nums:          # ← list `in`, walks every iteration → O(n²)
+        j = nums.index(target - num)  # ← another O(n) walk
+        if j != i: return [i, j]</code></pre>
+  <p><strong>Worst-case caveat (interview-ready):</strong> dict ops degrade to O(n) per call in the pathological case where every key hashes to the same bucket — adversarial inputs. CPython mitigates this with hash randomization (<code>PYTHONHASHSEED</code>), so it doesn't happen with normal numeric/string keys. Standard interview answer: <em>"O(n) average, O(n²) worst case for dicts; the accepted complexity for two_sum is O(n)."</em></p>
+  <p><strong>Sanity check you can run:</strong></p>
+  <pre><code>import time
+big = {i: i for i in range(10_000_000)}     # 10M-key dict
+t = time.perf_counter()
+for _ in range(1_000_000):
+    _ = 9_999_999 in big                     # 1M lookups, worst-positioned key
+print(f"{(time.perf_counter() - t)*1000:.1f}ms")
+# ~50–100ms. If `in` were linear, this would take hours.</code></pre>
+</div>
+
 <h3>Add / Update / Delete</h3>
 <pre><code>prices["MSFT"] = 300.0           # add
 prices["AAPL"] = 175.0           # update (same syntax)

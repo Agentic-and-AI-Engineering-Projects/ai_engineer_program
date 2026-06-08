@@ -125,6 +125,95 @@ def execute_tool(name, raw_input):
 
 ---
 
+## Anthropic API — Tunable Parameters
+
+The knobs on `client.messages.create(...)` / `.stream(...)`. Group by purpose.
+
+### Sampling (controls randomness)
+
+| Param | Default | Range | What it does |
+|---|---|---|---|
+| `temperature` | 1.0 | 0.0–1.0 | Lower = more deterministic. 0.0 ≈ "always pick highest-prob token." Use 0–0.3 for tool calls / structured output / classification. Use 0.7–1.0 for creative writing. |
+| `top_p` | 1.0 | 0.0–1.0 | Nucleus sampling — sample only from tokens whose cumulative prob ≥ top_p. Alternative to temperature. **Use one or the other, not both** (Anthropic's recommendation). |
+| `top_k` | unset | int | Sample only from top-k highest-prob tokens. Rarely used. Leave alone. |
+
+**Agentic rule of thumb:** `temperature=0` for anything involving tool calls or structured output — you want determinism in the agent loop.
+
+### Length & stopping
+
+| Param | Required? | What it does |
+|---|---|---|
+| `max_tokens` | **REQUIRED** | Maximum OUTPUT tokens. Doesn't bound input. Each model has its own ceiling (Sonnet 4.6: 64K out). |
+| `stop_sequences` | optional | List of strings; generation halts when any matches. Useful for "stop at next `</answer>`" patterns. |
+
+**Gotcha:** input tokens are bounded by the **context window** (200K standard, 1M for some configs). Output tokens are bounded by `max_tokens` + model's output cap. Two separate budgets.
+
+### Prompt caching (the biggest cost lever)
+
+```python
+messages = [{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": large_doc, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": user_question}
+    ]
+}]
+```
+
+- `cache_control: {"type": "ephemeral"}` caches the prefix for **5 minutes** (1-hour TTL is a beta).
+- Cache HIT cost: ~**10% of normal** input price. Cache MISS (first write): ~**25% more** than normal. Net win after ≥2 calls.
+- Up to **4 cache breakpoints** per request. Only PREFIXES are cached — order matters; stable content must come first.
+- System prompts cache too: `system=[{"type":"text","text":"...","cache_control":{"type":"ephemeral"}}]`.
+
+**In agentic systems**, cache the system prompt + tool schemas + early conversation history. Agents replay the same prefix every turn.
+
+### Streaming
+
+```python
+with client.messages.stream(...) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    response = stream.get_final_message()   # still needed for stop_reason
+```
+
+`stream=True` gives SSE events as tokens arrive. **Gotcha:** still need `get_final_message()` for `stop_reason`, full content blocks, and token usage. The tool loop logic stays the same; streaming is just better UX for the final text response.
+
+### Tool use
+
+| Param | What it does |
+|---|---|
+| `tools` | List of tool schemas (JSON Schema). |
+| `tool_choice` | Force behavior: `{"type":"auto"}` (default, model picks), `{"type":"any"}` (must call SOME tool), `{"type":"tool","name":"X"}` (must call X), `{"type":"none"}` (no tools). |
+| `disable_parallel_tool_use` | Boolean. If True, model returns at most one tool_use block per turn. Default False. |
+
+### Extended thinking (Claude 4+ reasoning models)
+
+```python
+thinking={"type": "enabled", "budget_tokens": 10000}
+```
+Lets the model do internal scratchpad reasoning before responding. `budget_tokens` caps the thinking. Counts as output tokens for cost. Visible as `thinking` content blocks if you inspect.
+
+### Batches (cost lever #2)
+
+`client.messages.batches.create(requests=[...])` — submit up to 100K requests, results within 24h, **50% discount**. Use case: offline backfills, eval suites, one-time embedding generation. Not for live serving.
+
+### Other
+
+| Param | What it does |
+|---|---|
+| `system` | System prompt — separate top-level param, NOT a message with `role:"system"`. |
+| `metadata.user_id` | Optional. Anthropic uses it for abuse tracking + per-end-user rate-limit allocation. |
+| `betas` header | Opt into beta features (extended cache TTL, computer-use, etc.). |
+
+### Interview talking points
+
+- *"Why temperature=0 in agentic code?"* — determinism in tool calls; same input → same call.
+- *"How do you control cost in production?"* — prompt caching (big lever), batches for offline work, smaller models for non-critical steps, max_tokens to cap runaway output.
+- *"Why both temperature and top_p?"* — you wouldn't; use one. Anthropic explicitly recommends one or the other.
+- *"What's the biggest cost lever you've used?"* — prompt caching for stable prefixes (system prompt + tool schemas + retrieved context). Up to 90% input-cost reduction on repeated calls.
+
+---
+
 ## Streaming (Anthropic SDK)
 
 ### Non-streaming vs streaming
@@ -179,6 +268,29 @@ def greet(name, greeting="Hello"):
 d = {"name": "Rajesh", "greeting": "Hi"}
 greet(**d)   # same as greet(name="Rajesh", greeting="Hi")
 ```
+
+### `in` operator — O(1) on dict/set, O(n) on list/tuple
+Same keyword, very different cost. Complexity depends on the right-hand-side type.
+
+| RHS type | What `x in container` does | Complexity |
+|---|---|---|
+| `list` / `tuple` | Walks the sequence element by element | **O(n)** |
+| `set` | Hashes `x`, jumps to bucket, checks equality | **O(1) avg** |
+| `dict` | Hashes `x`, jumps to bucket, checks **key** equality | **O(1) avg** |
+
+This is why LeetCode two_sum is O(n), not O(n²):
+```python
+seen = {}                             # dict — hash table
+for i, num in enumerate(nums):
+    if target - num in seen:          # O(1) avg, NOT a scan
+        return [seen[target - num], i]
+    seen[num] = i
+```
+A dict lookup is not a search; it's `hash(key) → bucket index → direct probe`. Outer loop n × O(1) = O(n) total.
+
+**Worst-case caveat:** dicts degrade to O(n) per call under pathological hash collisions (adversarial inputs). CPython's hash randomization (`PYTHONHASHSEED`) mitigates this. Interview answer: *"O(n) average, O(n²) worst case for dicts; accepted complexity for two_sum is O(n)."*
+
+**Trap to avoid:** swapping `seen` for the original list flips the algorithm to O(n²) — `if target - num in nums:` walks the list every iteration.
 
 ---
 
@@ -295,6 +407,95 @@ messages.append({"role": "user", "content": tool_results})
 ```
 - Claude sees the full history on every API call — stateless API, stateful client
 - Never mutate existing messages — always append
+
+---
+
+## Agentic Context Engineering — Stateless LLMs, the Harness, and Caching
+
+### The core insight (the foundational interview answer)
+- **LLMs are stateless.** Every API call is a fresh inference — there is no session inside the model.
+- The illusion of continuity is **entirely engineered by the code around the LLM** — that code is *the harness* (or *the agent*).
+- *"You are a stranger to me every call"* — the LLM sees only what the harness chose to put in the prompt.
+
+### What is a "harness"?
+The code that wraps the LLM and makes it useful. It:
+1. Assembles the prompt (system + history + memory + user message)
+2. Calls the LLM API
+3. Parses the response → text vs. tool calls
+4. **Executes** the tool calls (actually runs `Read`, `Bash`, `Grep`, …)
+5. Feeds tool results back as the next message
+6. Loops until the LLM stops calling tools
+7. Manages cache breakpoints, compaction, subagents
+
+| Harness | What it wraps |
+|---|---|
+| Claude Code CLI / VS Code extension | Claude + filesystem/shell/web tools |
+| LangGraph (P3, P7) | A harness *you write* — the StateGraph IS the harness |
+| CrewAI (P5) | Multi-agent harness — coordinates roles/tasks |
+| MatchScout Stage 3 | The LangGraph state machine looping Claude over candidates |
+| Cursor, Aider, Windsurf | Different harnesses around the same underlying LLMs |
+
+> **Interview line:** *"The agent decides X"* is sloppy. Say *"the harness decides X"* or *"the LLM decides X via tool calls the harness exposes."* That distinction separates a LangChain user from an agent architect.
+
+### The three context-management patterns
+| Pattern | Who decides what to include | Example |
+|---|---|---|
+| **Agent decides deterministically** | Harness rules: last N turns + system prompt + CLAUDE.md | Sliding window, simple chatbots |
+| **LLM decides via tools (agentic retrieval)** | LLM emits `search_memory` / `read_file` tool calls | Anthropic Memory tool, Mem0, Letta, Zep — *P9 frameworks* |
+| **Hybrid (state of the art)** | Deterministic baseline + LLM retrieval + auto-compaction | Claude Code, modern agents |
+
+### What Claude Code sends to the LLM every turn (concrete walkthrough)
+The harness assembles, in order:
+1. Tool definitions (Read, Bash, Edit, …)
+2. System prompt (behavior rules)
+3. Global `~/.claude/CLAUDE.md`
+4. Project `CLAUDE.md`
+5. `MEMORY.md` index + loaded memory files
+6. Full conversation history (verbatim, every prior turn)
+7. System reminders (git status, available skills, deferred tools)
+8. Current user message
+
+Plus three runtime mechanisms layered on top:
+- **Tool-driven retrieval** — LLM calls `Read`/`Grep`/`Glob` only when it needs them (the LLM-decides path)
+- **Automatic compaction** — near the window limit, older turns get summarized and replaced with the summary
+- **Subagents** — each gets a fresh context window for its task; only the final summary returns to the parent
+
+### Prompt caching — the economics
+Without caching, an agentic loop re-sending 30K tokens × 20 turns = **600K** billed input tokens.
+With caching: 30K (full price first time) + 19 × ~3K (cache reads) ≈ **87K** — **~7× cheaper**.
+
+| Cache mechanic | Detail |
+|---|---|
+| Match basis | **Exact prefix match, byte for byte** |
+| Cache write cost | ~125% of normal input (one-time populate) |
+| Cache read cost | ~10% of normal input (90% discount) |
+| TTL | 5 min default · 1 hour at higher cost |
+| Scope | Per-org / per-API-key — **not shared across customers** |
+| What's NOT cached | Current user message · current assistant response · anything after a divergence point in the prefix |
+| What invalidates the cache | Any byte change in the prefix (e.g., editing CLAUDE.md mid-session nukes everything cached after that point) |
+
+### The design principle (memorize this — it's the punchline)
+> **Stable content first, volatile content last.**
+>
+> Order: tool defs → system prompt → CLAUDE.md → memory → history → current message.
+>
+> Stability = cache hits = cheap iteration. Volatile content at the start of the prefix kills caching for everything downstream.
+
+### Interview phrasings to memorize
+- *"LLMs are stateless; agents engineer the illusion of state via prompt assembly."*
+- *"Context strategies trade recall vs. token cost vs. attention dilution (lost-in-the-middle)."*
+- *"Agentic retrieval pushes the relevance decision to the LLM via tool calls."*
+- *"Compaction is lossy summarization; RAG is lossy retrieval — different failure modes."*
+- *"Prompt caching turned context engineering from a quality-only problem into a quality-AND-economics problem."*
+- *"The harness decides; the LLM decides via tools the harness exposes."*
+
+### Questions this prepares you for
+- "How would you build memory for a long-running agent?"
+- "Tradeoff between RAG and stuffing the context?"
+- "Walk me through what happens when an agent's conversation exceeds the context window."
+- "How does Claude Code know what context to send the model each turn?"
+- "What changes when you turn on prompt caching?"
+- "Where in your projects have you handled context management?" → P1 message-lift to `main()`, P3 LangGraph state, P7 MatchScout prompt assembly, P9 memory framework benchmark.
 
 ---
 
@@ -1878,4 +2079,28 @@ Frameworks like `@mcp.tool()` assemble all three from a decorated function autom
 
 ---
 
-*Last updated: 2026-05-02 — Sections 6 (async/await) and 7 (Pydantic) complete. #69 Python Fundamentals DONE — ready for P7.*
+## Python Packaging & Distribution (PyPI, pip, venv) — added 2026-05-31
+
+**PyPI (Python Package Index)** — `pypi.org`, the official **public repository of Python packages**. `pip install X` downloads X from here. It's a single global namespace, so every package name must be unique (like the npm registry, but for Python). Checking if a name is "free on PyPI" = checking if that package name is unclaimed.
+
+| Term | One-liner |
+|---|---|
+| **PyPI** | The public index `pip` installs from (`pypi.org`). Global, unique package names. |
+| **pip** | Python's package installer — resolves + installs from PyPI (or another index). |
+| **venv** | Per-project isolated environment so deps don't collide: `python -m venv .venv && source .venv/bin/activate`. |
+| **sdist** | Source distribution (a `.tar.gz`); built on the user's machine at install time. |
+| **wheel** (`.whl`) | Pre-built binary distribution — no build step, faster install. `pip` prefers wheels. |
+| **pyproject.toml** | Modern build/metadata manifest (PEP 517/518/621): name, deps, **extras**, build backend. |
+| **extras** | Optional dependency groups: `pip install "pkg[dev]"` → installs the `dev` extra. |
+| **editable install** | `pip install -e .` — links the package to your source so edits take effect with no reinstall (dev workflow). |
+| **TestPyPI** | A separate sandbox index (`test.pypi.org`) for rehearsing a release. |
+
+**Publishing flow:** `python -m build` (creates sdist + wheel) → `twine upload dist/*` (uploads to PyPI; needs a unique name + API token). Rehearse on **TestPyPI** first.
+
+**Related tooling:** `conda` (alt package + env manager, science-heavy) · `uv` / `poetry` / `pip-tools` (faster installs, lockfiles) · `requirements.txt` (pinned dep list).
+
+**Interview soundbite:** *"PyPI is to `pip` what the npm registry is to `npm` — the central place packages are published to and installed from. You isolate per project with a venv, declare deps in `pyproject.toml`, install your own package editable with `pip install -e .` during dev, and publish with `build` + `twine`."*
+
+---
+
+*Last updated: 2026-05-31 — added Python Packaging & Distribution (PyPI/pip/venv). Prior: Sections 6 (async/await) and 7 (Pydantic) complete; #69 Python Fundamentals DONE.*

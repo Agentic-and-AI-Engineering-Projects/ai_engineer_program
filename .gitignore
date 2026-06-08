@@ -20,6 +20,7 @@ plan_checkpoint_*.py
 # Personal — interview prep stays local on a public repo
 INTERVIEW_STUDY_GUIDE.html
 JOB_SEARCH_PREP_PLAN.html
+interview_prep/
 
 # Sensitive — never commit
 .claude/

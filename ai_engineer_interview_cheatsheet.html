@@ -55,11 +55,14 @@
   <div class="section-label">P1 — ToolBot</div>
   <a href="#pydantic">Pydantic v2</a>
   <a href="#tool-use">Claude API — tool_use</a>
+  <a href="#tunables">API Tunable Parameters</a>
   <a href="#streaming">Streaming</a>
   <a href="#python">Python Concepts</a>
   <a href="#system-prompts">System Prompts</a>
   <a href="#context">Context + Multi-Turn Memory</a>
   <a href="#message-history">Message History Pattern</a>
+  <div class="section-label">Agentic Architecture</div>
+  <a href="#agentic-context">Stateless LLMs, Harness, Caching</a>
   <div class="section-label">Comparison</div>
   <a href="#anthropic-vs-openai">Anthropic vs OpenAI</a>
   <a href="#gemini">Gemini (google-genai)</a>
@@ -199,6 +202,82 @@ Claude → <span class="node">stop_reason="end_turn"</span>   <span class="label
     <span class="kw">return</span> <span class="fn">fn</span>(**validated.<span class="fn">model_dump</span>())          <span class="cm"># call with clean args</span></code></pre>
   <p>Single dispatch point for all tools. Keeps validation and dispatch logic in one place.</p>
 
+  <!-- TUNABLE PARAMETERS -->
+  <h2 id="tunables"><span class="tag">API</span> Anthropic API — Tunable Parameters</h2>
+  <p>The knobs on <code>client.messages.create(...)</code> / <code>.stream(...)</code>. Grouped by purpose.</p>
+
+  <h3>Sampling (controls randomness)</h3>
+  <table>
+    <thead><tr><th>Param</th><th>Default</th><th>Range</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>temperature</code></td><td>1.0</td><td>0.0–1.0</td><td>Lower = more deterministic. 0.0 ≈ "always pick highest-prob token." Use <strong>0–0.3 for tool calls / structured output / classification</strong>. Use 0.7–1.0 for creative writing.</td></tr>
+      <tr><td><code>top_p</code></td><td>1.0</td><td>0.0–1.0</td><td>Nucleus sampling — sample only from tokens whose cumulative prob ≥ top_p. Alternative to temperature. <strong>Use one or the other, not both</strong> (Anthropic's recommendation).</td></tr>
+      <tr><td><code>top_k</code></td><td>unset</td><td>int</td><td>Sample only from top-k highest-prob tokens. Rarely used. Leave alone.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><strong>Agentic rule of thumb:</strong> <code>temperature=0</code> for anything involving tool calls or structured output — you want determinism in the agent loop.</div>
+
+  <h3>Length &amp; stopping</h3>
+  <table>
+    <thead><tr><th>Param</th><th>Required?</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>max_tokens</code></td><td><strong>REQUIRED</strong></td><td>Maximum OUTPUT tokens. Doesn't bound input. Each model has its own ceiling (Sonnet 4.6: 64K out).</td></tr>
+      <tr><td><code>stop_sequences</code></td><td>optional</td><td>List of strings; generation halts when any matches. Useful for "stop at next <code>&lt;/answer&gt;</code>" patterns.</td></tr>
+    </tbody>
+  </table>
+  <div class="warn"><strong>Two separate budgets:</strong> input tokens are bounded by the <strong>context window</strong> (200K standard, 1M for some configs). Output tokens are bounded by <code>max_tokens</code> + the model's output cap. Don't confuse them.</div>
+
+  <h3>Prompt caching (the biggest cost lever)</h3>
+  <pre><code>messages = [{
+    <span class="st">"role"</span>: <span class="st">"user"</span>,
+    <span class="st">"content"</span>: [
+        {<span class="st">"type"</span>: <span class="st">"text"</span>, <span class="st">"text"</span>: large_doc, <span class="st">"cache_control"</span>: {<span class="st">"type"</span>: <span class="st">"ephemeral"</span>}},
+        {<span class="st">"type"</span>: <span class="st">"text"</span>, <span class="st">"text"</span>: user_question}
+    ]
+}]</code></pre>
+  <ul>
+    <li><code>cache_control: {"type": "ephemeral"}</code> caches the prefix for <strong>5 minutes</strong> (1-hour TTL is a beta).</li>
+    <li>Cache HIT cost: ~<strong>10% of normal</strong> input price. Cache MISS (first write): ~<strong>25% more</strong> than normal. Net win after ≥2 calls.</li>
+    <li>Up to <strong>4 cache breakpoints</strong> per request. Only PREFIXES are cached — order matters; stable content must come first.</li>
+    <li>System prompts cache too: <code>system=[{"type":"text","text":"...","cache_control":{"type":"ephemeral"}}]</code></li>
+  </ul>
+  <div class="note"><strong>In agentic systems:</strong> cache the system prompt + tool schemas + early conversation history. Agents replay the same prefix every turn.</div>
+
+  <h3>Tool use</h3>
+  <table>
+    <thead><tr><th>Param</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>tools</code></td><td>List of tool schemas (JSON Schema).</td></tr>
+      <tr><td><code>tool_choice</code></td><td>Force behavior: <code>{"type":"auto"}</code> (default, model picks), <code>{"type":"any"}</code> (must call SOME tool), <code>{"type":"tool","name":"X"}</code> (must call X), <code>{"type":"none"}</code> (no tools).</td></tr>
+      <tr><td><code>disable_parallel_tool_use</code></td><td>Boolean. If True, model returns at most one tool_use block per turn. Default False.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Extended thinking (Claude 4+ reasoning models)</h3>
+  <pre><code>thinking={<span class="st">"type"</span>: <span class="st">"enabled"</span>, <span class="st">"budget_tokens"</span>: 10000}</code></pre>
+  <p>Lets the model do internal scratchpad reasoning before responding. <code>budget_tokens</code> caps the thinking. Counts as output tokens for cost. Visible as <code>thinking</code> content blocks if you inspect.</p>
+
+  <h3>Batches (cost lever #2)</h3>
+  <p><code>client.messages.batches.create(requests=[...])</code> — submit up to <strong>100K requests</strong>, results within 24h, <strong>50% discount</strong>. Use case: offline backfills, eval suites, one-time embedding generation. Not for live serving.</p>
+
+  <h3>Other</h3>
+  <table>
+    <thead><tr><th>Param</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>system</code></td><td>System prompt — separate top-level param, NOT a message with <code>role:"system"</code>.</td></tr>
+      <tr><td><code>metadata.user_id</code></td><td>Optional. Anthropic uses it for abuse tracking + per-end-user rate-limit allocation.</td></tr>
+      <tr><td><code>betas</code> header</td><td>Opt into beta features (extended cache TTL, computer-use, etc.).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Interview talking points</h3>
+  <ul>
+    <li><strong>"Why temperature=0 in agentic code?"</strong> — determinism in tool calls; same input → same call.</li>
+    <li><strong>"How do you control cost in production?"</strong> — prompt caching (big lever), batches for offline work, smaller models for non-critical steps, <code>max_tokens</code> to cap runaway output.</li>
+    <li><strong>"Why both temperature and top_p?"</strong> — you wouldn't; use one. Anthropic explicitly recommends one or the other.</li>
+    <li><strong>"What's the biggest cost lever you've used?"</strong> — prompt caching for stable prefixes (system prompt + tool schemas + retrieved context). Up to 90% input-cost reduction on repeated calls.</li>
+  </ul>
+
   <!-- STREAMING -->
   <h2 id="streaming"><span class="tag">P1</span> Streaming (Anthropic SDK)</h2>
 
@@ -254,6 +333,26 @@ d = {<span class="st">"name"</span>: <span class="st">"Rajesh"</span>, <span cla
 
 <span class="fn">foo</span>()  <span class="cm"># → "second"</span></code></pre>
   <div class="warn"><strong>Gotcha:</strong> Python silently overwrites functions defined with the same name. No error, no warning. The first definition is gone.</div>
+
+  <h3><code>in</code> operator — O(1) on dict/set, O(n) on list/tuple</h3>
+  <p>Same keyword, very different cost. Complexity depends entirely on the right-hand-side type.</p>
+  <table>
+    <thead><tr><th>RHS type</th><th>What <code>x in container</code> does</th><th>Complexity</th></tr></thead>
+    <tbody>
+      <tr><td><code>list</code> / <code>tuple</code></td><td>Walks the sequence element by element</td><td><strong>O(n)</strong></td></tr>
+      <tr><td><code>set</code></td><td>Hashes <code>x</code>, jumps to bucket, checks equality</td><td><strong>O(1) avg</strong></td></tr>
+      <tr><td><code>dict</code></td><td>Hashes <code>x</code>, jumps to bucket, checks <strong>key</strong> equality</td><td><strong>O(1) avg</strong></td></tr>
+    </tbody>
+  </table>
+  <p>This is why LeetCode two_sum is O(n), not O(n²):</p>
+  <pre><code>seen = {}                             <span class="cm"># dict — hash table</span>
+<span class="kw">for</span> i, num <span class="kw">in</span> <span class="fn">enumerate</span>(nums):
+    <span class="kw">if</span> target - num <span class="kw">in</span> seen:          <span class="cm"># O(1) avg, NOT a scan</span>
+        <span class="kw">return</span> [seen[target - num], i]
+    seen[num] = i</code></pre>
+  <p>A dict lookup is not a search; it's <code>hash(key) → bucket index → direct probe</code>. Outer loop n × O(1) per iteration = <strong>O(n) overall</strong>.</p>
+  <div class="warn"><strong>Worst-case caveat:</strong> dicts degrade to O(n) per call under pathological hash collisions (adversarial inputs). CPython's hash randomization (<code>PYTHONHASHSEED</code>) mitigates this. Interview answer: <em>"O(n) average, O(n²) worst case for dicts; accepted complexity for two_sum is O(n)."</em></div>
+  <div class="warn"><strong>Trap:</strong> swapping <code>seen</code> for the original list flips the algorithm to O(n²) — <code>if target - num in nums:</code> walks the list every iteration.</div>
 
   <!-- SYSTEM PROMPTS -->
   <h2 id="system-prompts"><span class="tag">P1</span> System Prompts</h2>
@@ -345,6 +444,104 @@ messages.<span class="fn">append</span>({<span class="st">"role"</span>: <span c
   <ul>
     <li>Claude sees the full history on every API call — stateless API, stateful client</li>
     <li>Never mutate existing messages — always append</li>
+  </ul>
+
+  <!-- AGENTIC CONTEXT ENGINEERING -->
+  <h2 id="agentic-context">Agentic Context Engineering — Stateless LLMs, the Harness, and Caching</h2>
+
+  <h3>The core insight</h3>
+  <ul>
+    <li><strong>LLMs are stateless.</strong> Every API call is a fresh inference — no session inside the model.</li>
+    <li>The illusion of continuity is entirely engineered by the code around the LLM — <em>the harness</em>.</li>
+    <li>"You are a stranger to me every call" — the LLM sees only what the harness chose to put in the prompt.</li>
+  </ul>
+
+  <h3>What is a "harness"?</h3>
+  <p>The code that wraps the LLM and makes it useful. It:</p>
+  <ul>
+    <li>Assembles the prompt (system + history + memory + user message)</li>
+    <li>Calls the API; parses response → text vs. tool calls</li>
+    <li><strong>Executes</strong> the tool calls (actually runs <code>Read</code>, <code>Bash</code>, …)</li>
+    <li>Feeds results back as the next message; loops until the LLM stops calling tools</li>
+    <li>Manages cache breakpoints, compaction, subagents</li>
+  </ul>
+  <table>
+    <thead><tr><th>Harness</th><th>What it wraps</th></tr></thead>
+    <tbody>
+      <tr><td>Claude Code CLI / VS Code extension</td><td>Claude + filesystem/shell/web tools</td></tr>
+      <tr><td>LangGraph (P3, P7)</td><td>A harness <em>you write</em> — the StateGraph IS the harness</td></tr>
+      <tr><td>CrewAI (P5)</td><td>Multi-agent harness — coordinates roles/tasks</td></tr>
+      <tr><td>MatchScout Stage 3</td><td>LangGraph state machine looping Claude over candidates</td></tr>
+      <tr><td>Cursor, Aider, Windsurf</td><td>Different harnesses around the same underlying LLMs</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><strong>Interview line:</strong> "The agent decides X" is sloppy. Say "the harness decides X" or "the LLM decides X via tool calls the harness exposes." That distinction separates a LangChain user from an agent architect.</div>
+
+  <h3>The three context-management patterns</h3>
+  <table>
+    <thead><tr><th>Pattern</th><th>Who decides what to include</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td>Agent decides deterministically</td><td>Harness rules: last N turns + system prompt + CLAUDE.md</td><td>Sliding window, simple chatbots</td></tr>
+      <tr><td>LLM decides via tools (agentic retrieval)</td><td>LLM emits <code>search_memory</code> / <code>read_file</code> tool calls</td><td>Anthropic Memory tool, Mem0, Letta, Zep — <em>P9 frameworks</em></td></tr>
+      <tr><td>Hybrid (SOTA)</td><td>Deterministic baseline + LLM retrieval + auto-compaction</td><td>Claude Code, modern agents</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What Claude Code sends to the LLM every turn</h3>
+  <p>On every API call the harness assembles, in order:</p>
+  <ol style="color:#cbd5e0; font-size:15px; margin:10px 0 14px 28px;">
+    <li>Tool definitions (Read, Bash, Edit, …)</li>
+    <li>System prompt (behavior rules)</li>
+    <li>Global <code>~/.claude/CLAUDE.md</code></li>
+    <li>Project <code>CLAUDE.md</code></li>
+    <li><code>MEMORY.md</code> index + loaded memory files</li>
+    <li>Full conversation history (verbatim, every prior turn)</li>
+    <li>System reminders (git status, available skills, deferred tools)</li>
+    <li>Current user message</li>
+  </ol>
+  <p>Plus three runtime mechanisms layered on top:</p>
+  <ul>
+    <li><strong>Tool-driven retrieval</strong> — LLM calls <code>Read</code>/<code>Grep</code>/<code>Glob</code> only when needed (LLM-decides path)</li>
+    <li><strong>Automatic compaction</strong> — near the window limit, older turns get summarized + replaced</li>
+    <li><strong>Subagents</strong> — each gets a fresh window; only the final summary returns</li>
+  </ul>
+
+  <h3>Prompt caching — the economics</h3>
+  <p>Without caching, an agentic loop re-sending 30K tokens × 20 turns = <strong>600K</strong> billed input tokens.<br>
+  With caching: 30K (full price first time) + 19 × ~3K (cache reads) ≈ <strong>87K</strong> — <strong>~7× cheaper</strong>.</p>
+  <table>
+    <thead><tr><th>Mechanic</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>Match basis</td><td><strong>Exact prefix match, byte for byte</strong></td></tr>
+      <tr><td>Cache write cost</td><td>~125% of normal input (one-time populate)</td></tr>
+      <tr><td>Cache read cost</td><td>~10% of normal input (90% discount)</td></tr>
+      <tr><td>TTL</td><td>5 min default · 1 hour at higher cost</td></tr>
+      <tr><td>Scope</td><td>Per-org / per-API-key — <strong>not shared across customers</strong></td></tr>
+      <tr><td>What's NOT cached</td><td>Current user message · current assistant response · anything after a divergence in the prefix</td></tr>
+      <tr><td>What invalidates the cache</td><td>Any byte change in the prefix (editing CLAUDE.md mid-session nukes everything cached after it)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="good"><strong>Design principle (memorize):</strong> <strong>Stable content first, volatile content last.</strong> Order: tool defs → system prompt → CLAUDE.md → memory → history → current message. Stability = cache hits = cheap iteration. Volatility at the start of the prefix kills caching for everything downstream.</div>
+
+  <h3>Interview phrasings to memorize</h3>
+  <ul>
+    <li>"LLMs are stateless; agents engineer the illusion of state via prompt assembly."</li>
+    <li>"Context strategies trade recall vs. token cost vs. attention dilution (lost-in-the-middle)."</li>
+    <li>"Agentic retrieval pushes the relevance decision to the LLM via tool calls."</li>
+    <li>"Compaction is lossy summarization; RAG is lossy retrieval — different failure modes."</li>
+    <li>"Prompt caching turned context engineering from a quality-only problem into a quality-AND-economics problem."</li>
+    <li>"The harness decides; the LLM decides via tools the harness exposes."</li>
+  </ul>
+
+  <h3>Questions this prepares you for</h3>
+  <ul>
+    <li>"How would you build memory for a long-running agent?"</li>
+    <li>"Tradeoff between RAG and stuffing the context?"</li>
+    <li>"Walk me through what happens when an agent's conversation exceeds the context window."</li>
+    <li>"How does Claude Code know what context to send the model each turn?"</li>
+    <li>"What changes when you turn on prompt caching?"</li>
+    <li>"Where in your projects have you handled context management?" → P1 message-lift, P3 LangGraph state, P7 MatchScout prompt assembly, P9 memory framework benchmark.</li>
   </ul>
 
   <!-- ANTHROPIC VS OPENAI -->
@@ -876,8 +1073,25 @@ result = app.<span class="fn">invoke</span>(<span class="kw">None</span>, config
 
   <div class="good"><strong>Interview line:</strong> "I'd use LangGraph's interrupt_before with a MemorySaver checkpointer for dev HITL workflows — pause before a summarise or decision node, let a human review findings, inject edits via update_state, then resume with invoke(None, config)."</div>
 
+  <h2 id="pypi"><span class="tag">PKG</span> Python Packaging &amp; Distribution (PyPI, pip, venv)</h2>
+  <p><strong>PyPI (Python Package Index)</strong> — <code>pypi.org</code>, the official <strong>public repository of Python packages</strong>. <code>pip install X</code> downloads X from here. It's a single global namespace, so every package name must be unique (like the npm registry, but for Python). Checking if a name is "free on PyPI" = checking if that package name is unclaimed.</p>
+  <table>
+    <tr><th>Term</th><th>One-liner</th></tr>
+    <tr><td><code>PyPI</code></td><td>The public index <code>pip</code> installs from (<code>pypi.org</code>). Global, unique package names.</td></tr>
+    <tr><td><code>pip</code></td><td>Python's package installer — resolves + installs from PyPI (or another index).</td></tr>
+    <tr><td><code>venv</code></td><td>Per-project isolated environment: <code>python -m venv .venv &amp;&amp; source .venv/bin/activate</code>.</td></tr>
+    <tr><td>sdist</td><td>Source distribution (<code>.tar.gz</code>); built on the user's machine at install time.</td></tr>
+    <tr><td>wheel (<code>.whl</code>)</td><td>Pre-built binary distribution — no build step, faster install. <code>pip</code> prefers wheels.</td></tr>
+    <tr><td><code>pyproject.toml</code></td><td>Modern build/metadata manifest (PEP 517/518/621): name, deps, extras, build backend.</td></tr>
+    <tr><td>extras</td><td>Optional dependency groups: <code>pip install "pkg[dev]"</code> installs the <code>dev</code> extra.</td></tr>
+    <tr><td>editable install</td><td><code>pip install -e .</code> — links the package to your source so edits apply with no reinstall (dev workflow).</td></tr>
+    <tr><td>TestPyPI</td><td>Separate sandbox index (<code>test.pypi.org</code>) for rehearsing a release.</td></tr>
+  </table>
+  <p><strong>Publishing:</strong> <code>python -m build</code> (creates sdist + wheel) → <code>twine upload dist/*</code> (needs a unique name + API token). Rehearse on TestPyPI first. <strong>Related:</strong> <code>conda</code>, <code>uv</code>/<code>poetry</code>/<code>pip-tools</code>, <code>requirements.txt</code>.</p>
+  <div class="good"><strong>Interview line:</strong> "PyPI is to <code>pip</code> what the npm registry is to <code>npm</code> — the central place packages are published to and installed from. You isolate per project with a venv, declare deps in <code>pyproject.toml</code>, install your own package editable with <code>pip install -e .</code> during dev, and publish with <code>build</code> + <code>twine</code>."</div>
+
   <br><br>
-  <p style="color: #4a5080; font-size: 13px;">Last updated: 2026-04-17 — P3 ResearchBot complete (checkpointing, HITL, P3 quiz 6.5/7)</p>
+  <p style="color: #4a5080; font-size: 13px;">Last updated: 2026-05-31 — added Python Packaging &amp; Distribution (PyPI/pip/venv). [Note: this HTML trails the Markdown cheatsheet, which also has P4–P8 + #69.]</p>
 </main>
 
 </body>
