@@ -70,6 +70,7 @@
   <div class="section-label">P2 — DocTalk</div>
   <a href="#embeddings">Embeddings</a>
   <a href="#rag">RAG</a>
+  <a href="#llm-eval">LLM Evaluation</a>
   <div class="section-label">P3 — ResearchBot</div>
   <a href="#langgraph">LangGraph — Core</a>
   <a href="#annotated">Annotated State</a>
@@ -733,10 +734,44 @@ vector = model.<span class="fn">encode</span>(<span class="st">"some text"</span
     mag_b = math.<span class="fn">sqrt</span>(<span class="fn">sum</span>(x**<span class="num">2</span> <span class="kw">for</span> x <span class="kw">in</span> b))
     <span class="kw">return</span> dot / (mag_a * mag_b)</code></pre>
   <ul>
-    <li>Measures the <strong>angle</strong> between two vectors, not distance</li>
-    <li>Dividing by magnitude normalises for document length — measure <em>meaning</em>, not <em>size</em></li>
-    <li>Score guide: <code>1.0</code> identical, <code>0.8+</code> very similar, <code>0.5–0.7</code> related, <code>&lt;0.3</code> unrelated</li>
+    <li>Measures <strong>cos(θ)</strong> — the angle between vectors, not distance. Direction encodes semantics; magnitude doesn't.</li>
+    <li><strong>Range is [-1, +1]</strong>, NOT [0, 1]. +1 same direction, 0 orthogonal, -1 opposite.</li>
+    <li>Magnitude formula is <strong>n-dimensional Pythagoras</strong> — <code>sqrt(v₁² + v₂² + ... + vₙ²)</code>.</li>
+    <li>In practice with modern dense embeddings, values almost always fall in <strong>[0, 1]</strong> — these models live in the positive cone of the hypersphere.</li>
   </ul>
+
+  <h4>Practical score guide (modern embeddings)</h4>
+  <table>
+    <tr><th>Range</th><th>Interpretation</th></tr>
+    <tr><td><code>0.95–1.00</code></td><td>Near-duplicates / paraphrases</td></tr>
+    <tr><td><code>0.75–0.95</code></td><td>Same topic, similar meaning (includes antonyms — they share topic)</td></tr>
+    <tr><td><code>0.50–0.75</code></td><td>Loosely related / same domain</td></tr>
+    <tr><td><code>0.30–0.50</code></td><td>Different topics, overlapping vocabulary</td></tr>
+    <tr><td><code>0.00–0.30</code></td><td>Unrelated</td></tr>
+    <tr><td>Negative</td><td>Rare with modern models; treat as definitely unrelated</td></tr>
+  </table>
+
+  <div class="warn"><strong>Antonym paradox (interview gotcha).</strong> Antonyms do NOT come out at -1. <em>"Today is hot"</em> vs <em>"today is cold"</em> → cosine ≈ <strong>0.85</strong>, not -0.85. Reason: distributional hypothesis — antonyms share context (same structure, same topic, same register), so the model embeds them close. Dense embeddings encode contextual co-occurrence, NOT logical polarity. For negation/antonym detection use an NLI model or fine-tuned classifier, not raw embedding cosine.</div>
+
+  <h4>Cosine ↔ Euclidean equivalence (interview-defining fact)</h4>
+  <p>For L2-normalized (unit-length) vectors:</p>
+  <pre><code>|a - b|² = |a|² + |b|² - 2(a·b) = 1 + 1 - 2·cos(θ) = 2 - 2·cos(θ)</code></pre>
+  <p>Euclidean distance is a <strong>monotonic decreasing function of cosine</strong> when vectors are unit-normalized → they're <strong>rank-equivalent for retrieval</strong>. Top-K by cosine = Top-K by Euclidean.</p>
+
+  <h4>Production optimization: cosine → dot product</h4>
+  <p>Pre-normalize every vector to unit length at insert time. Then <code>|a| = |b| = 1</code> and:</p>
+  <pre><code>cos(θ) = (a · b) / (1 · 1) = a · b      # plain dot product</code></pre>
+  <p>No sqrt, no division — SIMD-friendly. Every production vector DB (Qdrant, Pinecone, FAISS) does this internally when you select "cosine" distance.</p>
+  <div class="note"><strong>Bonus:</strong> OpenAI <code>text-embedding-3-small/large</code> returns L2-normalized vectors by default. Cosine ≡ dot product out of the box — the <code>mag_a · mag_b</code> denominator in naive implementations is technically redundant.</div>
+
+  <h4>Unit vector vs standard basis vector</h4>
+  <ul>
+    <li><strong>Unit vector</strong> — length 1, ALL dimensions can be non-zero. E.g. <code>[3,4,0]</code> normalized is <code>[0.6, 0.8, 0]</code>. This is what matters for cosine.</li>
+    <li><strong>Standard basis vector</strong> — exactly one dimension = 1, rest are 0. E.g. <code>[1,0,0,...]</code>. A special case, not what "normalize a vector" means.</li>
+  </ul>
+
+  <h4>Why semantically related sentences cluster</h4>
+  <p><strong>Distributional hypothesis</strong> (Firth, 1957): "a word is known by the company it keeps." Training pushes vectors of contextually co-occurring tokens into similar directions. This is why "cat sat on mat" and "feline rested on rug" embed at ~0.65 despite zero word overlap — and also why antonyms paradoxically cluster.</p>
 
   <!-- RAG -->
   <h2 id="rag"><span class="tag">P2</span> RAG (Retrieval Augmented Generation)</h2>
@@ -800,6 +835,115 @@ response = anthropic.<span class="fn">Anthropic</span>().messages.<span class="f
     system=<span class="st">"Answer using only the context provided. Cite page numbers."</span>,
     messages=[{<span class="st">"role"</span>: <span class="st">"user"</span>, <span class="st">"content"</span>: <span class="st">f"Context:\n{context}\n\nQuestion: {question}"</span>}]
 )</code></pre>
+
+  <!-- LLM EVALUATION -->
+  <h2 id="llm-eval"><span class="tag">EVAL</span> LLM Evaluation</h2>
+
+  <h3>The eval-tier hierarchy</h3>
+  <p>Use the highest tier you can afford given the problem structure.</p>
+  <table>
+    <tr><th>Tier</th><th>Method</th><th>When</th><th>Bias</th></tr>
+    <tr><td>1</td><td><strong>Outcome eval</strong></td><td>Observable downstream success (sale, click, gig completion)</td><td>None — market is judge</td></tr>
+    <tr><td>2</td><td><strong>Human eval</strong></td><td>High-stakes, low volume</td><td>Inter-rater disagreement</td></tr>
+    <tr><td>3</td><td><strong>LLM-as-judge</strong></td><td>High volume, no outcome signal</td><td>6 known biases (below)</td></tr>
+    <tr><td>4</td><td><strong>Heuristic</strong></td><td>Format / citation / length checks</td><td>None but narrow</td></tr>
+  </table>
+
+  <h3>The 6 LLM-as-judge biases</h3>
+  <table>
+    <tr><th>#</th><th>Bias</th><th>Plain meaning</th><th>Fix</th></tr>
+    <tr><td>1</td><td>Position</td><td>Picks whichever response is shown first ~10-15% more often</td><td>Run both orderings, require agreement</td></tr>
+    <tr><td>2</td><td>Verbosity</td><td>Longer answer wins, even when info-equivalent</td><td>Rubric scoring, not "which is better"</td></tr>
+    <tr><td>3</td><td>Self-preference</td><td>Claude-judge rates Claude output 10-25% higher</td><td>Cross-family judge (Claude generates → GPT judges)</td></tr>
+    <tr><td>4</td><td>Style</td><td>Markdown + formal tone beat casual prose with same content</td><td>Strip formatting before judging</td></tr>
+    <tr><td>5</td><td>Calibration drift</td><td>Judge model update → all scores shift</td><td>Pin judge version; treat as versioned dependency</td></tr>
+    <tr><td>6</td><td>Preference leakage</td><td>Same training family → up to 28.7% bias (ICLR 2026)</td><td>Cross-family judge; audit training data overlap</td></tr>
+  </table>
+
+  <h3>Component vs system vs outcome eval (RAG)</h3>
+  <pre><code>Component (retrieval)  → recall@k, precision@k against gold-labeled chunks
+Component (generation) → faithfulness given fixed perfect context
+System (end-to-end)    → full pipeline; what grade_answer() does
+Outcome                → did user succeed? (MatchScout style)</code></pre>
+  <p>When end-to-end regresses, you can't tell if retrieval or generation broke. Run component evals to localize.</p>
+
+  <h3>Golden dataset — the 7-step build</h3>
+  <ol>
+    <li><strong>Define task as a contract</strong> — what properties must hold? (factual grounding, citation correctness, refusal behavior)</li>
+    <li><strong>Sample inputs from production distribution</strong> — buckets: 60% happy / 25% edge / 15% adversarial</li>
+    <li><strong>Humans write expected outputs</strong> — domain experts, ~50-500 examples</li>
+    <li><strong>Pick storage form</strong> (table below)</li>
+    <li><strong>Write deterministic grading function</strong> — push as much as possible from probabilistic (LLM-judge) to deterministic (field equality, regex)</li>
+    <li><strong>Wire into CI as non-gating job + dashboard</strong> — pass rate weekly, by bucket, by failure mode</li>
+    <li><strong>Maintain it</strong> — gold sets rot in 6 months without ~10% maintenance budget</li>
+  </ol>
+
+  <h3>Storage forms for "expected" output</h3>
+  <table>
+    <tr><th>Form</th><th>Match</th><th>When</th></tr>
+    <tr><td>Exact string</td><td><code>==</code></td><td>Math, classification</td></tr>
+    <tr><td>Required substrings</td><td><code>all(kw in output)</code></td><td>Fact-bearing Q&amp;A</td></tr>
+    <tr><td><strong>Structured fields (JSON)</strong></td><td>per-field equality</td><td><strong>Best general answer</strong></td></tr>
+    <tr><td>Reference text</td><td>cosine similarity ≥ threshold</td><td>Paraphrase-tolerant tasks</td></tr>
+    <tr><td>Rubric</td><td>LLM-judge against rubric</td><td>Open generation</td></tr>
+  </table>
+  <p><strong>Cosine-similarity caveat:</strong> "Press for 2 seconds" vs "Press for 20 seconds" → cosine ≈ 0.97. Numbers, negation, named entities get averaged out. Bad for fact-precise Q&amp;A; good for summary/style match.</p>
+
+  <h3>Structured output for grading (the strongest move)</h3>
+  <p>Don't grade prose — force JSON via tool_use, grade fields. Trivial, deterministic, no regex.</p>
+<pre><code>tools = [{
+    <span class="st">"name"</span>: <span class="st">"answer"</span>,
+    <span class="st">"input_schema"</span>: {
+        <span class="st">"type"</span>: <span class="st">"object"</span>,
+        <span class="st">"properties"</span>: {
+            <span class="st">"action"</span>: {<span class="st">"type"</span>: <span class="st">"string"</span>, <span class="st">"enum"</span>: [<span class="st">"press"</span>, <span class="st">"press_hold"</span>, <span class="st">"double_tap"</span>]},
+            <span class="st">"target"</span>: {<span class="st">"type"</span>: <span class="st">"string"</span>},
+            <span class="st">"duration_seconds"</span>: {<span class="st">"type"</span>: <span class="st">"number"</span>},
+            <span class="st">"natural_language_answer"</span>: {<span class="st">"type"</span>: <span class="st">"string"</span>},
+            <span class="st">"page_citations"</span>: {<span class="st">"type"</span>: <span class="st">"array"</span>, <span class="st">"items"</span>: {<span class="st">"type"</span>: <span class="st">"integer"</span>}}
+        },
+        <span class="st">"required"</span>: [<span class="st">"action"</span>, <span class="st">"target"</span>, <span class="st">"page_citations"</span>]
+    }
+}]
+tool_choice = {<span class="st">"type"</span>: <span class="st">"tool"</span>, <span class="st">"name"</span>: <span class="st">"answer"</span>}
+
+<span class="cm"># Grading collapses to:</span>
+fields_correct = <span class="fn">sum</span>(actual[k] == expected[k] <span class="kw">for</span> k <span class="kw">in</span> expected) / <span class="fn">len</span>(expected)</code></pre>
+
+  <h3>Citation extraction (deterministic, no LLM-judge)</h3>
+<pre><code><span class="kw">import</span> re
+<span class="kw">def</span> <span class="fn">extract_pages</span>(model_output: <span class="kw">str</span>) -> <span class="kw">set</span>[<span class="kw">int</span>]:
+    pattern = <span class="st">r"[Pp](?:age|p\.?)\.?\s*(\d+)(?:\s*[-–]\s*(\d+))?"</span>
+    pages = <span class="kw">set</span>()
+    <span class="kw">for</span> m <span class="kw">in</span> re.<span class="fn">finditer</span>(pattern, model_output):
+        start = <span class="kw">int</span>(m.<span class="fn">group</span>(<span class="nu">1</span>))
+        end = <span class="kw">int</span>(m.<span class="fn">group</span>(<span class="nu">2</span>)) <span class="kw">if</span> m.<span class="fn">group</span>(<span class="nu">2</span>) <span class="kw">else</span> start
+        pages.<span class="fn">update</span>(<span class="kw">range</span>(start, end + <span class="nu">1</span>))
+    <span class="kw">return</span> pages
+
+<span class="cm"># Use issubset — extra citations OK, missing not OK</span>
+citation_correct = <span class="kw">set</span>(expected).<span class="fn">issubset</span>(<span class="fn">extract_pages</span>(output))</code></pre>
+  <p>Brittle without enforced format. Production move: structured output with a <code>cited_pages: list[int]</code> field — no regex.</p>
+
+  <h3>Prompt iteration — 5 tiers</h3>
+  <table>
+    <tr><th>Tier</th><th>Method</th><th>When</th></tr>
+    <tr><td>1</td><td>Manual loop — bucket failures, fix dominant bucket, re-measure</td><td>Baseline. 80% of real work.</td></tr>
+    <tr><td>2</td><td>Few-shot examples embedded in prompt</td><td>Anchors format + refusal; cheapest big lift</td></tr>
+    <tr><td>3</td><td>Structural: chain-of-thought, decomposition, output schema, negative constraints, personas</td><td>Multi-hop, fact precision</td></tr>
+    <tr><td>4</td><td>Programmatic: <strong>DSPy</strong> (auto-optimize few-shots + instructions), <strong>Promptfoo</strong> (side-by-side A/B), <strong>TextGrad</strong> (gradient-like updates)</td><td>Manual plateaued</td></tr>
+    <tr><td>5</td><td>Versioned prompts + outcome A/B (MatchScout pattern)</td><td>Production with observable outcomes</td></tr>
+  </table>
+  <p>Fall back to fine-tuning only when all 5 plateau.</p>
+
+  <h3>Interview talking points</h3>
+  <ul>
+    <li><em>"Use the highest eval tier the problem allows — outcome &gt; human &gt; LLM-judge &gt; heuristic — and don't pretend a lower tier is a higher one."</em></li>
+    <li><em>"LLM-as-judge has 6 biases. The fixes reduce them; they don't eliminate them. Always pair with deterministic checks and human spot-checks."</em></li>
+    <li><em>"For RAG, run component evals (retrieval recall@k, generation faithfulness with fixed context) AND system eval. End-to-end alone can't localize regressions."</em></li>
+    <li><em>"Push everything you can from probabilistic to deterministic: structured output → field equality, citation regex, JSON schema, length bounds."</em></li>
+    <li><em>"In MatchScout I chose outcome eval over LLM-judge — two-arm A/B, chi-squared significance — because gigs give observable success. LLM judges (Ragas, DeepEval, Promptfoo) are dev-time tools, not release gates."</em></li>
+  </ul>
 
   <!-- LANGGRAPH CORE -->
   <h2 id="langgraph"><span class="tag">P3</span> LangGraph — Core</h2>

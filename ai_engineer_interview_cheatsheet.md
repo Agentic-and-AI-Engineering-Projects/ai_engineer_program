@@ -804,10 +804,47 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     mag_b = math.sqrt(sum(x**2 for x in b))
     return dot / (mag_a * mag_b)
 ```
-- Measures the **angle** between two vectors, not distance
-- Dividing by magnitude normalizes for document length — you measure *meaning*, not *size*
-- Returns 1.0 for identical vectors (angle = 0°, cos(0°) = 1.0)
-- Score guide: 1.0 = identical, 0.8+ = very similar, 0.5–0.7 = related, <0.3 = unrelated
+- Measures **cos(θ)** — the angle between vectors, not distance. Direction encodes semantics; magnitude doesn't.
+- **Range is [-1, +1]**, NOT [0, 1]. +1 same direction, 0 orthogonal, -1 opposite.
+- Magnitude formula is **n-dimensional Pythagoras** — `sqrt(v₁² + v₂² + ... + vₙ²)`.
+- In practice with modern dense embeddings (OpenAI text-embedding-3, Sentence-BERT), values almost always fall in **[0, 1]** — these models live in the positive cone of the hypersphere.
+
+#### Practical score guide (modern embeddings)
+| Range | Interpretation |
+|---|---|
+| 0.95–1.00 | Near-duplicates / paraphrases |
+| 0.75–0.95 | Same topic, similar meaning (includes antonyms — they share topic) |
+| 0.50–0.75 | Loosely related / same domain |
+| 0.30–0.50 | Different topics, overlapping vocabulary |
+| 0.00–0.30 | Unrelated |
+| Negative | Rare with modern models; treat as definitely unrelated |
+
+#### Antonym paradox (interview gotcha)
+Antonyms do NOT come out at -1. "Today is hot" vs "today is cold" → cosine ≈ **0.85**, not -0.85. Reason: distributional hypothesis — antonyms share context (same sentence structure, same topic, same register), so the model embeds them close. Dense embeddings encode contextual co-occurrence, NOT logical polarity. For negation/antonym detection use an NLI model or fine-tuned classifier, not raw embedding cosine.
+
+#### Cosine ↔ Euclidean equivalence (interview-defining fact)
+For L2-normalized (unit-length) vectors:
+```
+|a - b|² = |a|² + |b|² - 2(a·b) = 1 + 1 - 2·cos(θ) = 2 - 2·cos(θ)
+```
+Euclidean distance is a **monotonic decreasing function of cosine** when vectors are unit-normalized → they're **rank-equivalent for retrieval**. Top-K by cosine = Top-K by Euclidean.
+
+#### Production optimization: cosine → dot product
+Pre-normalize every vector to unit length at insert time. Then `|a| = |b| = 1` and:
+```
+cos(θ) = (a · b) / (1 · 1) = a · b      # plain dot product
+```
+No sqrt, no division — SIMD-friendly. Every production vector DB (Qdrant, Pinecone, FAISS) does this internally when you select "cosine" distance.
+
+**Bonus:** OpenAI `text-embedding-3-small/large` returns L2-normalized vectors by default. Cosine ≡ dot product out of the box — the `mag_a · mag_b` denominator in naive implementations is technically redundant.
+
+#### Unit vector vs standard basis vector
+Two different things both called "unit":
+- **Unit vector** — length 1, ALL dimensions can be non-zero. E.g. `[3,4,0]` normalized is `[0.6, 0.8, 0]`. This is the one that matters for cosine.
+- **Standard basis vector** — exactly one dimension = 1, rest are 0. E.g. `[1,0,0,...]`. A special case, not what "normalize a vector" means.
+
+#### Why semantically related sentences cluster
+**Distributional hypothesis** (Firth, 1957): "a word is known by the company it keeps." Training pushes vectors of contextually co-occurring tokens into similar directions. This is why "cat sat on mat" and "feline rested on rug" embed at ~0.65 despite zero word overlap — and also why antonyms paradoxically cluster.
 
 ---
 
@@ -916,6 +953,128 @@ print(response.content[0].text)
 **Why cosine similarity is fast:** embedding is slow (neural network + API call, done once at index time). Cosine similarity is just a dot product on vectors already in RAM — milliseconds regardless of corpus size.
 
 **Citation pattern:** page numbers come from `doc.metadata['page']` — injected into the context string so Claude can reference them in its answer.
+
+---
+
+## LLM Evaluation
+
+### The eval-tier hierarchy
+Use the highest tier you can afford given your problem.
+
+| Tier | Method | When | Bias |
+|---|---|---|---|
+| 1 | **Outcome eval** | You can observe downstream success (sale, click, gig completion) | None — market is judge |
+| 2 | **Human eval** | High-stakes, low volume | Disagreement among humans |
+| 3 | **LLM-as-judge** | High volume, no outcome signal | 6 known biases (see below) |
+| 4 | **Heuristic** | Format/citation/length checks | None but narrow |
+
+### The 6 LLM-as-judge biases (memorize for interviews)
+
+| # | Bias | Plain meaning | Fix |
+|---|---|---|---|
+| 1 | Position | Judge picks whichever response is shown first ~10-15% more often | Run both orderings, require agreement |
+| 2 | Verbosity | Longer answer wins even when info-equivalent | Rubric scoring, not "which is better" |
+| 3 | Self-preference | Claude-judge rates Claude output 10-25% higher | Cross-family judge (Claude generates → GPT judges) |
+| 4 | Style | Markdown tables + formal tone beat casual prose with same content | Strip formatting before judging |
+| 5 | Calibration drift | Judge model update → all scores shift | Pin judge version, treat as versioned dependency |
+| 6 | Preference leakage | Same training family → up to 28.7% bias (ICLR 2026) | Cross-family, audit shared training data |
+
+### Component vs system vs outcome eval (RAG)
+
+```
+Component (retrieval) → recall@k, precision@k against gold-labeled chunks
+Component (generation) → faithfulness given fixed perfect context
+System (end-to-end)   → full pipeline; what grade_answer() does
+Outcome              → did user succeed? (MatchScout style)
+```
+
+When end-to-end regresses, you can't tell if retrieval or generation broke. Run component evals to localize.
+
+### Golden dataset — the 7-step build
+
+1. **Define the task as a contract** — what properties must hold? (factual grounding, citation correctness, refusal behavior)
+2. **Sample inputs from production distribution** — buckets: 60% happy / 25% edge / 15% adversarial
+3. **Humans write expected outputs** — domain experts, ~50-500 examples
+4. **Pick storage form** (table below)
+5. **Write deterministic grading function** — push as much grading from probabilistic (LLM-judge) to deterministic (field equality, regex)
+6. **Wire into CI as non-gating job + dashboard** — track pass rate weekly, by bucket, by failure mode
+7. **Maintain it** — gold sets rot in 6 months without ~10% maintenance budget
+
+### Storage forms for "expected" output
+
+| Form | Match | When |
+|---|---|---|
+| Exact string | `==` | Math, classification |
+| Required substrings | `all(kw in output)` | Fact-bearing Q&A |
+| Structured fields (JSON) | per-field equality | **Best general answer** |
+| Reference text | cosine similarity ≥ threshold | Paraphrase-tolerant tasks |
+| Rubric | LLM-judge against rubric | Open generation |
+
+**Cosine-similarity caveat:** "Press for 2 seconds" vs "Press for 20 seconds" cosine ≈ 0.97. Numbers/negation/named-entities get averaged out. Bad for fact-precise Q&A; good for summary/style match.
+
+### Structured output for grading
+
+Don't grade prose — force JSON via tool_use, grade fields. Trivial, deterministic, no regex.
+
+```python
+tools = [{
+    "name": "answer",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["press", "press_hold", "double_tap"]},
+            "target": {"type": "string"},
+            "duration_seconds": {"type": "number"},
+            "natural_language_answer": {"type": "string"},
+            "page_citations": {"type": "array", "items": {"type": "integer"}}
+        },
+        "required": ["action", "target", "page_citations"]
+    }
+}]
+tool_choice = {"type": "tool", "name": "answer"}
+
+# Grading collapses to:
+fields_correct = sum(actual[k] == expected[k] for k in expected) / len(expected)
+```
+
+### Citation extraction (deterministic, no LLM-judge)
+
+```python
+import re
+def extract_pages(model_output: str) -> set[int]:
+    pattern = r"[Pp](?:age|p\.?)\.?\s*(\d+)(?:\s*[-–]\s*(\d+))?"
+    pages = set()
+    for m in re.finditer(pattern, model_output):
+        start = int(m.group(1))
+        end = int(m.group(2)) if m.group(2) else start
+        pages.update(range(start, end + 1))
+    return pages
+
+# Use issubset — extra citations OK, missing not OK
+citation_correct = set(expected).issubset(extract_pages(output))
+```
+
+Brittle without enforced format. Production move: structured output → `cited_pages: list[int]` field, no regex.
+
+### Prompt iteration — 5 tiers
+
+| Tier | Method | When |
+|---|---|---|
+| 1 | Manual loop — bucket failures, fix dominant bucket, re-measure | Baseline |
+| 2 | Few-shot examples in prompt | Anchors format + refusal behavior; cheapest big lift |
+| 3 | Structural: chain-of-thought, decomposition, output schema, negative constraints | Multi-hop, fact precision |
+| 4 | Programmatic: **DSPy** (auto-optimize few-shots + instructions), **Promptfoo** (side-by-side A/B), **TextGrad** (gradient-like updates) | Manual plateaued |
+| 5 | Versioned prompts + outcome A/B (MatchScout pattern) | Production with observable outcomes |
+
+Fall back to fine-tuning only when all 5 plateau.
+
+### Interview talking points
+
+- *"Use the highest eval tier the problem allows — outcome > human > LLM-judge > heuristic — and don't pretend a lower tier is the higher one."*
+- *"LLM-as-judge has 6 biases. The fixes don't eliminate them, they reduce them. Always pair with deterministic checks and human spot-checks."*
+- *"For RAG, run component evals (retrieval recall@k, generation faithfulness with fixed context) and system eval. End-to-end alone can't localize regressions."*
+- *"For grading, push everything you can from probabilistic to deterministic: structured output → field equality, citation regex, JSON schema, length bounds."*
+- *"In MatchScout I chose outcome eval over LLM-judge — two-arm A/B, chi-squared significance — because gigs give observable success signal. LLM judges are dev-time tools, not release gates."*
 
 ---
 

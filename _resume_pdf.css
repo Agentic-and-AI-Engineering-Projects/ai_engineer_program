@@ -1,0 +1,108 @@
+/* Compression-equivalent CSS for resume PDF generation via pandoc + weasyprint.
+   Matches the python-docx compression: 0.5/0.6 in margins, 10pt body,
+   tight paragraph spacing, sized headings. */
+
+@page {
+    size: letter;
+    margin: 0.5in 0.6in 0.5in 0.6in;
+}
+
+body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.22;
+    color: #1a1a1a;
+}
+
+h1 {
+    font-size: 16pt;
+    font-weight: bold;
+    margin: 0 0 1pt 0;
+    color: #1a3a6c;
+}
+
+h2 {
+    font-size: 10.5pt;
+    font-weight: bold;
+    margin: 5pt 0 2pt 0;
+    color: #1a3a6c;
+    text-transform: uppercase;
+    border-bottom: 0.5pt solid #ccc;
+    padding-bottom: 0.5pt;
+    letter-spacing: 0.2pt;
+}
+
+h3 {
+    font-size: 10pt;
+    font-weight: bold;
+    margin: 4pt 0 1pt 0;
+    color: #1a3a6c;
+}
+
+h4 {
+    font-size: 9.5pt;
+    font-weight: bold;
+    margin: 3pt 0 1pt 0;
+    color: #333;
+}
+
+p {
+    margin: 0 0 2pt 0;
+}
+
+ul {
+    margin: 0 0 3pt 0;
+    padding-left: 14pt;
+}
+
+li {
+    margin: 0 0 0.5pt 0;
+    line-height: 1.22;
+}
+
+a {
+    color: #1a5da0;
+    text-decoration: none;
+}
+
+strong {
+    font-weight: bold;
+}
+
+em {
+    font-style: italic;
+    color: #444;
+}
+
+code {
+    font-family: "Menlo", "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f3f3f7;
+    padding: 0 2pt;
+    border-radius: 2pt;
+}
+
+hr {
+    border: none;
+    border-top: 0.5pt solid #ddd;
+    margin: 2pt 0;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 3pt 0;
+    font-size: 9.5pt;
+}
+
+th, td {
+    border: 0.3pt solid #ddd;
+    padding: 2pt 4pt;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: #f5f5f8;
+    font-weight: bold;
+}
