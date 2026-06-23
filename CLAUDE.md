@@ -7,11 +7,13 @@ No passive video courses — learning by doing, with deeplearning.ai shorts on-d
 
 ## The Person
 - Rajesh Ramani, 54, program manager background (infrastructure domain, Apple)
-- CS degree 1989, languages: C, C++, PHP, decent Python, web apps
-- AWS Certified Solutions Architect Associate
-- 15+ years away from core dev, returning now
-- Real-world agentic work at Onemyle startup (augments this training)
-- Goal: Agentic AI Engineer positions within 4 months (by ~July 2026)
+- CS degree 1989, languages: C, C++, PHP, Python (now primary)
+- AWS Certified Solutions Architect Associate · PMI-PMP · KCNA · GCP CDL · CSM
+- 15+ years away from core dev when starting this program; now returning as hands-on builder
+- Real-world agentic work as Investor / Agentic AI Product Consultant at Onemyle startup
+- Open-source author: HPRC Framework (Apache-2.0)
+- **Identity hook (locked in resumes 2026-06-17):** "Apple Alum and Agentic AI Engineering Consultant"
+- **Goal (active since 2026-05-27):** Agentic AI Engineer roles primary, AI Program Management roles secondary. Open to mid-IC salary for practical agentic AI experience.
 
 ## Kanban Tracking
 - Tool: MyKanban at http://192.168.1.156:3002
@@ -191,17 +193,73 @@ All three API keys are in .env: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KE
 Each session: Claude gives the day's task, Rajesh codes it, concepts explained inline.
 Weekly plan tickets in Kanban track the week's goals.
 
-## Current Status (as of 2026-04-26)
-- [x] P1 ToolBot — COMPLETE (Tickets #17-20, quiz 7/7)
-- [x] P2 DocTalk — COMPLETE (Tickets #21-24, quiz 6.5/8)
-- [x] P3 ResearchBot — COMPLETE (Tickets #25-27, #65, #66, quiz 6.5/7)
-- [x] P4 StockSage — COMPLETE (Tickets #29-33, quiz 6.5/8)
-- [x] P5 ReviewCrew — COMPLETE (Tickets #34-36, quiz 6/6)
-- [ ] P6 MCP++ — IN PROGRESS (Ticket #37 in progress)
-  - [x] server_intro.py — FastMCP server, streamable-http, get_stock_price tool
-  - [x] client_intro.py — async client, asyncio.gather for concurrent calls
-  - [ ] Resources + prompt templates (#38)
-  - [ ] StockSage tools as MCP server + OAuth 2.1 (#39, #73)
+## Current Status (as of 2026-06-23)
+
+### Curriculum build phase — COMPLETE for P1–P7
+- [x] P1 ToolBot — COMPLETE (quiz 7/7)
+- [x] P2 DocTalk — COMPLETE (quiz 6.5/8)
+- [x] P3 ResearchBot — COMPLETE (quiz 6.5/7)
+- [x] P4 StockSage — COMPLETE (quiz 6.5/8)
+- [x] P5 ReviewCrew — COMPLETE (quiz 6/6)
+- [x] P6 MCP++ — COMPLETE (quiz 5/7)
+- [x] P7 MatchScout — **substantively COMPLETE** for job-application purposes (Phases 0–5 done, LangSmith @traceable shipped, Phases 5.4/5.5 + 6–8 deferred indefinitely)
+- [x] HPRC Framework — built offline 2026-05-31 to 2026-06-03 at ~/ai/Prep, Apache-2.0 open source (NOT a curriculum project — added as a portfolio centerpiece)
+
+### Build phase — DEFERRED post-job-search
+- P8 PII Compliance · P9 standalone 4-framework memory benchmark (rolled into P13) · P10 AgentPlatform · P11 Multimodal · P12 5-framework showdown · P13 MatchScout V2 Agent SDK · P14 MatchScout V3 Managed Agents
+
+### Active phase — REVISION ARC + JOB SEARCH (since 2026-05-27)
+**P1–P7 deep-walk revision for interview prep** is currently in flight, interleaved with the job-application pipeline.
+- [x] P1 ToolBot revision — COMPLETE (6 concepts)
+- [x] P2 DocTalk revision — COMPLETE (5 concepts)
+- [ ] **P3 ResearchBot revision — IN PROGRESS** (Concepts 1-7 ✅ as of 2026-06-23; Concept 8 = Kafka pattern remaining)
+- [ ] P4 StockSage revision — queued
+- [ ] P5 ReviewCrew revision — queued
+- [ ] P6 MCP++ revision — queued
+- [ ] P7 MatchScout revision — queued
+
+**Per-concept workflow (updated 2026-06-22):** code re-read → **Phase A: 6-10 objective-type questions** (MCQ/T-F/fill-in-blank/match — NOT free text) → grade + gap-fill → Phase B (2–3 sharpest interview-grade points) → patch INTERVIEW_STUDY_GUIDE.html and cheatsheets. See `feedback_phase_a_objective_format.md`.
+
+### Interview prep tasks (interleaved with revision arc — see plan.txt)
+- [x] Task 1 — Claude Code interview Q&A — patched into study guide 2026-06-18
+- [x] **Task 3 — Common agentic AI interview Q&A bank — COMPLETE 2026-06-23**. 150 questions across 13 categories at `advanced_patterns/interview_questions_bank.html`, also Appendix E of the master guide.
+- [ ] Task 2 — System design prioritized ~15 patterns — queued (after P4)
+- [ ] **Database Foundations (PostgreSQL + MongoDB short courses)** — added to plan.txt 2026-06-23, not yet started; suggested slot between P4 and Task 2.
+
+### Active job applications (as of 2026-06-23 — 6 in flight)
+| Company | Role | Track | Applied |
+|---|---|---|---|
+| Apple | Agentic AI Product Manager (Austin) | AI PM | 2026-06-11 |
+| Oracle OCI | Sr. Principal TPM (DC Expansion SWAT) | DC Infra PM | 2026-06-12 |
+| Palo Alto Networks | 10x AI Engineer | AI Engineer | 2026-06-17 |
+| Heartflow | Senior Agentic AI Engineer | AI Engineer | 2026-06-17 |
+| NVIDIA | Senior TPM, Server Engineering Operations | DC Infra PM | 2026-06-18 |
+| **Apple ASE PMO** | Program Manager, PMO (Apple Services Engineering) | PM + AI fluency | **2026-06-22 — strongest fit** |
+
+**Skipped in this batch:** NVIDIA Agentic Engineering (compiler/GPU specialized) · Equinix Senior Staff (deferred).
+
+**Standing rule when a recruiter responds:** drop revision/curriculum work, load the corresponding interview-prep memory file, start mocking.
+
+### Advanced Patterns track (parallel to main curriculum)
+- [x] A1 Orchestrator-Worker — README + runnable `pattern.py` at `advanced_patterns/01_orchestrator_worker/`
+- [x] Supervisor (CrewAI Process.hierarchical) — README + runnable `pattern.py` at `advanced_patterns/02_supervisor_crewai/`
+- [ ] Remaining 20 patterns from the curated 22-pattern advanced track (queued in `advanced_patterns/README.md`)
+
+### Master Guide (consolidated doc — built 2026-06-23)
+`AGENTIC_AI_MASTER_GUIDE.html` at repo root: 851KB consolidated document with 6 navigable sections (cheatsheet + study guide + 5 appendices). Gitignored — it's a derived artifact built from source files via `/tmp/build_master_guide.py`. See `project_master_guide.md` memory file for build details.
+
+## Resume + Cover Letter Pipeline
+- Markdown source: `RESUME_*.md` / `COVER_LETTER_*.md` at repo root
+- Build pipeline: `pandoc → docx → _compress_resume.py` (margin/font/spacing compression)
+- Optional PDF: `_build_resume_pdf.sh` (pandoc → standalone HTML → Chrome headless)
+- Locked profile summary for active batch: stored in `~/.claude/projects/.../memory/project_resume_summary_batch_2026_06.md`
+- Style rules (set 2026-06-15): no em-dashes in cover letters; no "12+ years" specific count; no PATENT section; no expired NVIDIA AI-in-the-Data-Center cert
+- Don't-oversell calibration: MatchScout labeled "PoC" honestly; HPRC labeled "open-source framework" not "production at scale"
+
+## Repository Architecture (post-split 2026-06-08)
+- **`ai_engineer_program`** (this repo) — curriculum projects P1–P14 + interview study guide + cheatsheets + resume pipeline
+- **`Onemyle-matchscout`** (separate repo, ~/ai/Onemyle-matchscout/) — MatchScout PoC, split out 2026-06-08
+- **HPRC Framework** (~/ai/Prep/) — open-source, lives under its own GitHub org `HPRCFramework` (separate from `Agentic-and-AI-Engineering-Projects`)
 
 ## Related Projects
 - Onemyle / reel-analysis-lib: ~/ai/Onemyle/reel-analysis-lib (real-world agent deployment)

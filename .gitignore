@@ -33,3 +33,6 @@ chroma_data/
 **/*.jpg
 !matchscout-onemyle/**/*.jpeg  # allow project-related images later
 !matchscout-onemyle/**/*.jpg
+
+# Master guide is derived from sources via /tmp/build_master_guide.py
+AGENTIC_AI_MASTER_GUIDE.html

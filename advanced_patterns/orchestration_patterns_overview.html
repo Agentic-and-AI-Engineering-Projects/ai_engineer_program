@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agentic Orchestration Patterns — Overview</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { useMaxWidth: true } });</script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 1100px;
+    margin: 2em auto;
+    padding: 0 2em;
+    line-height: 1.55;
+    color: #222;
+  }
+  h1 { color: #1a1a1a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.3em; }
+  h2 {
+    color: #1a73e8;
+    margin-top: 2.5em;
+    padding: 0.4em 0.6em;
+    background: #f0f7ff;
+    border-left: 5px solid #1a73e8;
+  }
+  h3 { color: #444; margin-top: 1.6em; }
+  h4 { color: #555; margin-top: 1.2em; margin-bottom: 0.4em; }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 1em;
+    overflow-x: auto;
+    font-size: 0.9em;
+  }
+  code {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 0.92em;
+  }
+  pre code { background: none; padding: 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 0.95em;
+  }
+  th, td { border: 1px solid #d0d7de; padding: 0.5em 0.8em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  .mermaid { background: #fafbfc; padding: 1em; border-radius: 6px; text-align: center; }
+  .use-case {
+    background: #fff8e1;
+    border-left: 4px solid #fbbc04;
+    padding: 0.8em 1em;
+    margin: 0.8em 0;
+  }
+  .when-yes {
+    background: #e6f4ea;
+    border-left: 4px solid #34a853;
+    padding: 0.8em 1em;
+    margin: 0.6em 0;
+  }
+  .when-no {
+    background: #fce8e6;
+    border-left: 4px solid #ea4335;
+    padding: 0.8em 1em;
+    margin: 0.6em 0;
+  }
+  .summary {
+    background: #fff8dc;
+    border-left: 5px solid #d4a017;
+    padding: 0.8em 1em;
+    margin: 1em 0;
+    font-style: italic;
+  }
+  nav {
+    background: #f0f7ff;
+    padding: 0.8em 1.2em;
+    border-radius: 6px;
+    margin-bottom: 2em;
+  }
+  nav a { display: inline-block; margin-right: 1.2em; color: #1a73e8; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Agentic Orchestration Patterns — Overview</h1>
+
+<p>Five common patterns for orchestrating multi-step or multi-agent work in production AI systems. Each is presented as: <strong>use case</strong> → <strong>architecture diagram</strong> → <strong>code skeleton</strong> → <strong>when to use vs not use</strong> → <strong>where the LLM decides what</strong>.</p>
+
+<p>The spectrum, from <em>least</em> to <em>most</em> LLM-driven orchestration:</p>
+
+<table>
+  <tr><th>Pattern</th><th>What the LLM decides</th><th>What the code decides</th></tr>
+  <tr><td>1. Sequential Pipeline</td><td>Nothing about flow</td><td>Everything (fixed order)</td></tr>
+  <tr><td>2. Conditional Router</td><td>Which of N pre-defined branches to take</td><td>The set of options</td></tr>
+  <tr><td>3. Orchestrator-Worker</td><td>WHAT subtasks exist (and how many)</td><td>WHO runs them (single worker type), parallel dispatch</td></tr>
+  <tr><td>4. Supervisor / Hierarchical</td><td>WHAT, WHO, and WHEN (full delegation)</td><td>The agent pool</td></tr>
+  <tr><td>5. ReAct Loop</td><td>Every step iteratively</td><td>The loop + tool definitions</td></tr>
+</table>
+
+<div class="summary">
+<strong>The unifying lens — "Who decides the flow?"</strong> Every pattern can be classified by who answers two questions at runtime:
+<ol>
+  <li><strong>Which step runs next?</strong> — flow decisions</li>
+  <li><strong>What does that step do?</strong> — work decisions</li>
+</ol>
+Sequential Pipeline answers both with <strong>code</strong>. ReAct answers both with the <strong>LLM</strong>. The middle three patterns split the responsibility differently. Pick the pattern by deciding how much of the flow you want code to lock down vs how much you want the LLM to drive at runtime.
+</div>
+
+<h3>How frameworks map onto these patterns</h3>
+
+<p>The patterns are framework-agnostic. The same five patterns show up across LangGraph, CrewAI, OpenAI Agents SDK, AutoGen, Claude Agent SDK, and vanilla Python. Quick map:</p>
+
+<table>
+  <tr><th>Pattern</th><th>LangGraph way</th><th>CrewAI way</th></tr>
+  <tr><td>Sequential Pipeline</td><td><code>add_edge</code> chain</td><td><code>Process.sequential</code> with tasks in list order</td></tr>
+  <tr><td>Conditional Router</td><td><code>add_conditional_edges</code></td><td>(no first-party equivalent; rare in CrewAI)</td></tr>
+  <tr><td>Orchestrator-Worker</td><td>Orchestrator node + Send API + Worker node + Synthesizer node</td><td>Possible via manual task chaining; CrewAI's first-party version is more supervisor-flavored</td></tr>
+  <tr><td>Supervisor</td><td>Build it yourself with conditional edges + LLM router</td><td><code>Process.hierarchical</code> with a <code>manager_agent</code></td></tr>
+  <tr><td>ReAct Loop</td><td>Cyclic graph with <code>add_conditional_edges</code> looping back</td><td>Single-agent <code>Crew</code> with tools and verbose=True</td></tr>
+</table>
+
+<p>The framework choice doesn't change which pattern you're implementing. The pattern is the shape; the framework is how you express it.</p>
+
+<nav>
+  <strong>Jump to:</strong>
+  <a href="#sequential">1. Sequential</a>
+  <a href="#router">2. Router</a>
+  <a href="#orchestrator">3. Orchestrator-Worker</a>
+  <a href="#supervisor">4. Supervisor</a>
+  <a href="#react">5. ReAct</a>
+  <a href="#comparison">Comparison</a>
+</nav>
+
+<!-- ============================================================== -->
+<h2 id="sequential">1. Sequential Pipeline</h2>
+
+<div class="use-case">
+<strong>Use case:</strong> A daily newsletter generator. Every morning at 7am, it (1) fetches the top 10 news articles, (2) summarizes each with an LLM, (3) ranks by relevance, (4) formats into HTML, (5) sends via email. Same 5 steps, same order, every day.
+</div>
+
+<h3>Architecture</h3>
+<div class="mermaid">
+flowchart LR
+  A[Fetch articles] --> B[Summarize each]
+  B --> C[Rank by relevance]
+  C --> D[Format HTML]
+  D --> E[Send email]
+</div>
+
+<h3>Code skeleton (LangGraph)</h3>
+<pre><code>def fetch_articles(state):
+    articles = newsapi.fetch_top(10)
+    return {"articles": articles}
+
+def summarize(state):
+    summaries = [llm.summarize(a) for a in state["articles"]]
+    return {"summaries": summaries}
+
+def rank(state):
+    ranked = sorted(state["summaries"], key=relevance_score, reverse=True)
+    return {"ranked": ranked}
+
+def format_html(state):
+    html = render_template("newsletter.html", items=state["ranked"])
+    return {"html": html}
+
+def send_email(state):
+    smtp.send(state["html"])
+    return {}
+
+graph = StateGraph(NewsState)
+graph.add_node("fetch", fetch_articles)
+graph.add_node("summarize", summarize)
+graph.add_node("rank", rank)
+graph.add_node("format", format_html)
+graph.add_node("send", send_email)
+
+graph.set_entry_point("fetch")
+graph.add_edge("fetch", "summarize")
+graph.add_edge("summarize", "rank")
+graph.add_edge("rank", "format")
+graph.add_edge("format", "send")
+graph.add_edge("send", END)
+</code></pre>
+
+<h3>Where the LLM decides what</h3>
+<p><strong>Nothing about flow.</strong> The LLM is used <em>inside</em> a node (the summarize step calls an LLM) but it doesn't influence WHICH step runs next or HOW MANY times. The code defines the entire flow at design time.</p>
+
+<h3>Same pattern, CrewAI flavor</h3>
+<p><strong>CrewAI's <code>Process.sequential</code> is just this pattern in CrewAI's vocabulary.</strong> Tasks declared in a list with explicit <code>agent=...</code> per task; execution follows list order. Same as the LangGraph <code>add_edge</code> chain above — the framework changes, the pattern doesn't.</p>
+
+<pre><code>from crewai import Agent, Task, Crew, Process
+
+fetcher = Agent(role="News Fetcher", ...)
+summarizer = Agent(role="Summarizer", ...)
+formatter = Agent(role="Formatter", ...)
+sender = Agent(role="Sender", ...)
+
+tasks = [
+    Task(description="Fetch articles", agent=fetcher),
+    Task(description="Summarize each", agent=summarizer, context=[tasks[0]]),
+    Task(description="Format HTML", agent=formatter, context=[tasks[1]]),
+    Task(description="Send email", agent=sender, context=[tasks[2]]),
+]
+
+crew = Crew(
+    agents=[fetcher, summarizer, formatter, sender],
+    tasks=tasks,
+    process=Process.sequential,    <span class="cm"># ← Sequential Pipeline pattern</span>
+)
+crew.kickoff()</code></pre>
+
+<p>P5 ReviewCrew uses exactly this shape: three tasks (fetch_task, review_task, summary_task) with hardcoded agent assignments, executed in list order. No LLM decides what runs next.</p>
+
+<div class="when-yes">
+<strong>Use when:</strong> The steps are known business requirements. The order never changes. Each step depends predictably on the previous. You want maximum determinism and easy debugging.
+</div>
+
+<div class="when-no">
+<strong>Don't use when:</strong> The steps depend on input content (different inputs need different work). The order should adapt. You're tempted to add lots of <code>if/else</code> inside nodes to switch behavior — that's a signal you need a router or orchestrator instead.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="router">2. Conditional Router</h2>
+
+<div class="use-case">
+<strong>Use case:</strong> Customer support triage. A user message arrives. An LLM classifies it as one of three categories: <code>billing</code>, <code>technical</code>, or <code>sales</code>. Each category goes to a different specialist handler. The set of categories is FIXED — code knows about exactly three.
+</div>
+
+<h3>Architecture</h3>
+<div class="mermaid">
+flowchart TD
+  A[User message arrives] --> B[Classifier LLM]
+  B -.-> C[billing_handler]
+  B -.-> D[technical_handler]
+  B -.-> E[sales_handler]
+  C --> F[Send response]
+  D --> F
+  E --> F
+  F --> G([END])
+</div>
+
+<h3>Code skeleton (LangGraph)</h3>
+<pre><code>def classify(state):
+    """The LLM here makes ONE decision: which branch?
+    The set of possible answers is fixed at design time."""
+    response = llm.invoke(f"""Classify this message as one of:
+    'billing', 'technical', 'sales'.
+    Message: {state['message']}
+    Return only the category name.""")
+    return {"category": response.strip()}
+
+def route(state) -> str:
+    """Router function: pure (state) -> str. Picks the next node."""
+    return state["category"]   # returns "billing", "technical", or "sales"
+
+def billing_handler(state):
+    return {"reply": llm.invoke(f"Handle this billing question: {state['message']}")}
+
+def technical_handler(state):
+    return {"reply": llm.invoke(f"Handle this tech question: {state['message']}")}
+
+def sales_handler(state):
+    return {"reply": llm.invoke(f"Handle this sales question: {state['message']}")}
+
+graph.add_node("classify", classify)
+graph.add_node("billing", billing_handler)
+graph.add_node("technical", technical_handler)
+graph.add_node("sales", sales_handler)
+graph.set_entry_point("classify")
+
+graph.add_conditional_edges("classify", route, {
+    "billing":   "billing",
+    "technical": "technical",
+    "sales":     "sales",
+})
+graph.add_edge("billing", END)
+graph.add_edge("technical", END)
+graph.add_edge("sales", END)
+</code></pre>
+
+<h3>Where the LLM decides what</h3>
+<p><strong>One decision: which of the 3 pre-defined branches.</strong> The code already knows all possible destinations. The LLM picks one. After that single decision, the flow is fixed.</p>
+
+<div class="when-yes">
+<strong>Use when:</strong> The work splits into a SMALL, FIXED set of well-defined branches. You want the LLM to make a single routing decision. Examples: intent classification, language detection, severity triage.
+</div>
+
+<div class="when-no">
+<strong>Don't use when:</strong> The branches aren't well-defined or the count varies (use orchestrator-worker). The decision is mechanical and rule-based (use plain <code>if/else</code> in a node, no LLM needed).
+</div>
+
+<!-- ============================================================== -->
+<h2 id="orchestrator">3. Orchestrator-Worker</h2>
+
+<div class="use-case">
+<strong>Use case:</strong> A research assistant. The user submits a topic. An LLM decomposes it into N research questions (the number and content vary per topic). N parallel workers each research one question via web search. A synthesizer LLM folds findings into a coherent report.
+</div>
+
+<h3>Architecture</h3>
+<div class="mermaid">
+flowchart TD
+  A[User topic] --> B[Orchestrator LLM<br/>decomposes into N questions]
+  B -.Send API.-> C1[Worker 1<br/>question 1]
+  B -.Send API.-> C2[Worker 2<br/>question 2]
+  B -.Send API.-> C3[Worker N<br/>question N]
+  C1 --> D[Synthesizer LLM]
+  C2 --> D
+  C3 --> D
+  D --> E([END])
+</div>
+
+<h3>Code skeleton (LangGraph with Send API)</h3>
+<pre><code>def orchestrator(state):
+    """LLM decomposes topic into N questions. N varies by topic."""
+    response = llm.invoke(f"""Decompose '{state['topic']}' into 3-5
+    specific research questions. Return JSON array.""")
+    questions = json.loads(response)
+    return {"questions": questions}     # could be 3, 4, or 5 items
+
+def dispatch(state) -> list[Send]:
+    """Spawn one parallel worker per question. N is decided at runtime."""
+    return [Send("worker", {"question": q}) for q in state["questions"]]
+
+def worker(state):
+    """Single worker type. Each instance gets a different question."""
+    findings = web_search(state["question"], max_results=3)
+    return {"findings": findings}   # operator.add reducer accumulates
+
+def synthesizer(state):
+    """LLM folds all worker findings into coherent narrative."""
+    text = "\n".join(str(f) for f in state["findings"])
+    response = llm.invoke(f"Synthesize: {text}")
+    return {"summary": response}
+
+graph.set_entry_point("orchestrator")
+graph.add_conditional_edges("orchestrator", dispatch, ["worker"])
+graph.add_edge("worker", "synthesizer")
+graph.add_edge("synthesizer", END)
+</code></pre>
+
+<h3>Where the LLM decides what</h3>
+<p><strong>WHAT subtasks exist and how many.</strong> The orchestrator LLM might generate 3 questions for one topic and 7 for another. The code dispatches one worker per question. WHO handles each is fixed (always the single <code>worker</code> function). WHEN they run is fixed (always in parallel). The LLM controls the SHAPE of the work, the code controls the dispatch mechanism.</p>
+
+<h3>Three runs, identical code, different execution shapes</h3>
+
+<table>
+<tr><th>Topic</th><th>LLM-generated questions</th><th>Worker count</th></tr>
+<tr><td>"quantum computing"</td><td>["What are qubits?", "What hardware exists?", "What problems can it solve?"]</td><td>3</td></tr>
+<tr><td>"ancient Roman history"</td><td>["When did Rome fall?", "Who were the emperors?", "How was the Senate?", "Roman law?", "The army?"]</td><td>5</td></tr>
+<tr><td>"Paris weather today"</td><td>["Current temp?", "Today's forecast?"]</td><td>2</td></tr>
+</table>
+
+<p>Same code, same graph. Different worker counts emerged from what the LLM produced.</p>
+
+<div class="when-yes">
+<strong>Use when:</strong> The set of subtasks depends on the input. You don't know at design time how many or what they are. Each subtask is independent (parallelizable). You have one or a small fixed set of worker types.
+</div>
+
+<div class="when-no">
+<strong>Don't use when:</strong> The subtasks are always the same (sequential pipeline). Different subtasks need different worker types AND the LLM should pick which (supervisor). The subtasks aren't independent and need to share intermediate state.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="supervisor">4. Supervisor / Hierarchical (CrewAI Process.hierarchical)</h2>
+
+<div class="use-case">
+<strong>Use case:</strong> A content production team. Manager agent reviews a request and decides at each step: "I need the researcher first" → researcher returns sources → "now I need the writer to draft" → writer returns draft → "the editor needs to polish before publishing" → editor refines. Three SPECIALIZED agents with different skills; the manager LLM picks WHO does WHAT and WHEN, dynamically.
+</div>
+
+<h3>Architecture</h3>
+<div class="mermaid">
+flowchart TD
+  A[User request] --> B[Manager Agent LLM]
+  B -.decides who & when.-> C[Researcher Agent]
+  B -.decides who & when.-> D[Writer Agent]
+  B -.decides who & when.-> E[Editor Agent]
+  C --> B
+  D --> B
+  E --> B
+  B --> F[Final output]
+  F --> G([END])
+</div>
+
+<p>Note: every arrow back to the manager — the manager keeps control after each specialist returns, deciding the next move.</p>
+
+<h3>Code skeleton (CrewAI)</h3>
+<pre><code>from crewai import Agent, Task, Crew, Process
+
+manager = Agent(
+    role="Content Manager",
+    goal="Coordinate research, writing, and editing to produce a polished article",
+    backstory="Senior editor at a magazine. Picks the right specialist for each phase.",
+)
+
+researcher = Agent(
+    role="Researcher",
+    goal="Find authoritative sources on the assigned topic",
+    backstory="Detail-oriented investigator with web search skills.",
+    tools=[web_search_tool],
+)
+
+writer = Agent(
+    role="Writer",
+    goal="Draft engaging long-form content from research",
+    backstory="Award-winning journalist with a clear, punchy style.",
+)
+
+editor = Agent(
+    role="Editor",
+    goal="Polish drafts for clarity, accuracy, and tone",
+    backstory="Veteran copy editor with a sharp eye for inconsistency.",
+)
+
+crew = Crew(
+    agents=[researcher, writer, editor],     # available specialists
+    tasks=[
+        Task(description="Produce an article on {topic}", expected_output="Polished article"),
+    ],
+    manager_agent=manager,                   # the LLM that decides
+    process=Process.hierarchical,            # ← supervisor pattern
+)
+
+result = crew.kickoff(inputs={"topic": "AI in healthcare"})
+</code></pre>
+
+<h3>Where the LLM decides what</h3>
+<p><strong>WHAT, WHO, and WHEN — full delegation.</strong> The manager LLM sees the task and the pool of available agents, then dynamically picks who handles what, in what order, and whether to loop back for revisions. Code only defines the agents (their roles/skills); the manager orchestrates everything else.</p>
+
+<h3>Same agents, two processes — what changes</h3>
+
+<p>The clearest way to internalize the difference between Sequential Pipeline and Supervisor is to write the same crew twice — once with each process. SAME agents, SAME goal, SAME tools. Different process flag changes the entire execution shape:</p>
+
+<table>
+  <tr><th></th><th><code>Process.sequential</code> (Sequential Pipeline)</th><th><code>Process.hierarchical</code> (Supervisor)</th></tr>
+  <tr><td><strong>Task definition</strong></td><td>Each task has explicit <code>agent=...</code></td><td>Tasks have <code>agent=None</code> — manager assigns</td></tr>
+  <tr><td><strong>Task order</strong></td><td>List order = execution order</td><td>Manager picks order at runtime</td></tr>
+  <tr><td><strong>Skip / loop</strong></td><td>Every task always runs; no skipping</td><td>Manager can skip tasks, loop back, request revisions</td></tr>
+  <tr><td><strong>Manager agent</strong></td><td>Not needed</td><td>Required (<code>manager_agent=manager</code>)</td></tr>
+  <tr><td><strong>Cost</strong></td><td>One LLM call per task (predictable)</td><td>One LLM call per task + manager decisions between (variable)</td></tr>
+  <tr><td><strong>Best when</strong></td><td>Order is known business requirement</td><td>Order depends on intermediate output quality</td></tr>
+</table>
+
+<p><strong>Concrete code-level difference:</strong></p>
+
+<pre><code><span class="cm"># Process.sequential — code decides flow</span>
+review_task = Task(
+    description="Review the PR diff",
+    agent=code_reviewer,                      <span class="cm"># ← hardcoded</span>
+    context=[fetch_task],                      <span class="cm"># ← hardcoded dependency</span>
+)
+crew = Crew(
+    tasks=[fetch_task, review_task, summary_task],
+    process=Process.sequential,
+)
+
+<span class="cm"># Process.hierarchical — LLM decides flow</span>
+review_task = Task(
+    description="Review the PR diff",
+    agent=None,                                <span class="cm"># ← manager decides</span>
+    <span class="cm"># no context — manager decides what flows where</span>
+)
+crew = Crew(
+    agents=[code_reviewer, security_reviewer, tech_writer],
+    tasks=[review_task],
+    manager_agent=manager,                    <span class="cm"># ← supervisor LLM</span>
+    process=Process.hierarchical,
+)</code></pre>
+
+<p><strong>The mental model:</strong> Process flag → orchestration pattern. <code>Process.sequential</code> IS Sequential Pipeline. <code>Process.hierarchical</code> IS Supervisor. CrewAI's process types are direct implementations of the patterns from this overview.</p>
+
+<h3>Same problem as Orchestrator-Worker but different shape</h3>
+<table>
+<tr><th>Property</th><th>Orchestrator-Worker</th><th>Supervisor (CrewAI hierarchical)</th></tr>
+<tr><td>Number of LLM "decisions" per run</td><td>1 (decompose) + 1 (synthesize) = 2</td><td>Many (one per delegation choice)</td></tr>
+<tr><td>Worker types</td><td>Usually 1 (or few)</td><td>Multiple distinct specialists</td></tr>
+<tr><td>Dispatch shape</td><td>Parallel fan-out, then synthesize</td><td>Serial delegations, possibly looping</td></tr>
+<tr><td>Cost predictability</td><td>Predictable: 2 + N LLM calls</td><td>Variable: M delegations × (manager + specialist) calls</td></tr>
+<tr><td>Common failure mode</td><td>Workers running on bad subtask decomposition</td><td>Manager loops indefinitely, racks up cost</td></tr>
+</table>
+
+<div class="when-yes">
+<strong>Use when:</strong> You have a SET of distinct specialist agents with different skills (researcher, writer, editor — not three generic workers). The flow between them is unpredictable and depends on intermediate output quality. Examples: content production, code-modification across files, multi-step troubleshooting.
+</div>
+
+<div class="when-no">
+<strong>Don't use when:</strong> The specialists are interchangeable (use orchestrator-worker). The flow is predictable enough to wire as a sequential pipeline. Cost matters more than flexibility (every delegation is a manager LLM call — expensive at scale).
+</div>
+
+<!-- ============================================================== -->
+<h2 id="react">5. ReAct Loop (Reason + Act)</h2>
+
+<div class="use-case">
+<strong>Use case:</strong> A tool-using agent for an internal "ask anything" Q&amp;A bot. User asks: "How many failed deployments did we have last week, and what was the root cause of the biggest one?" The agent needs to: query the deployment DB, find failures, look up incident reports, read logs, summarize. Each step depends on the result of the previous step — the agent decides each tool call iteratively.
+</div>
+
+<h3>Architecture</h3>
+<div class="mermaid">
+flowchart TD
+  A[User question] --> B[LLM: think + decide tool]
+  B -.decides STOP.-> F[Return answer]
+  B -.decides CONTINUE.-> C[Execute tool]
+  C --> D[Observe result]
+  D --> B
+  F --> E([END])
+</div>
+
+<h3>Code skeleton (LangGraph)</h3>
+<pre><code>def reason(state):
+    """LLM looks at message history + observations, decides:
+    - What tool to call next (with args), or
+    - That it has enough info to answer (FINAL_ANSWER)"""
+    response = llm.invoke(state["messages"], tools=TOOLS)
+    return {"messages": [response]}
+
+def execute_tool(state):
+    """Run whatever tool the LLM picked, append result to messages."""
+    last = state["messages"][-1]
+    if last.tool_calls:
+        results = [run_tool(tc) for tc in last.tool_calls]
+        return {"messages": results}
+    return {}
+
+def should_continue(state) -> str:
+    """Loop until LLM stops calling tools (signals: I have an answer)."""
+    last = state["messages"][-1]
+    return "execute" if last.tool_calls else "done"
+
+graph.set_entry_point("reason")
+graph.add_conditional_edges("reason", should_continue, {
+    "execute": "execute_tool",
+    "done":    END,
+})
+graph.add_edge("execute_tool", "reason")     # ← the CYCLE</code></pre>
+
+<h3>Where the LLM decides what</h3>
+<p><strong>Every step, iteratively.</strong> Each turn the LLM looks at the cumulative message history and decides: "Do I call tool X? Tool Y? Or am I done?" The number of iterations is entirely emergent — could be 2, could be 20.</p>
+
+<h3>A typical trace</h3>
+<pre><code>Iteration 1:  LLM → "Call query_db('SELECT * FROM deployments WHERE status=failed AND week=last')"
+              Tool returns: [list of 4 failed deployments]
+Iteration 2:  LLM → "Call get_incident_report(deploy_id=42)"  (picked the biggest)
+              Tool returns: [incident report text]
+Iteration 3:  LLM → "Call read_logs(deploy_id=42, timeframe='around failure')"
+              Tool returns: [log excerpt]
+Iteration 4:  LLM → "I have enough info. Final answer: 4 failures last week. The biggest, deploy-42, failed due to a database migration timeout. Root cause: an unindexed JOIN added in commit abc123."
+              No more tool calls → loop exits.</code></pre>
+
+<div class="when-yes">
+<strong>Use when:</strong> Open-ended problems where the path isn't known in advance. The agent has tools and the LLM needs to chain them dynamically. Examples: code assistants (Claude Code is a ReAct loop), question-answering over multiple data sources, exploratory data analysis.
+</div>
+
+<div class="when-no">
+<strong>Don't use when:</strong> The flow is predictable (any other pattern is more efficient). Cost matters and you don't want unbounded LLM calls — ReAct can loop many times. You need fine-grained checkpoint boundaries (every iteration is a checkpoint, which can be expensive). Always pair with <code>recursion_limit</code> and explicit iteration counters.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="comparison">Full Comparison</h2>
+
+<table>
+<tr>
+  <th></th>
+  <th>1. Sequential</th>
+  <th>2. Router</th>
+  <th>3. Orchestrator-Worker</th>
+  <th>4. Supervisor</th>
+  <th>5. ReAct</th>
+</tr>
+<tr>
+  <td><strong>LLM decides flow?</strong></td>
+  <td>No</td>
+  <td>1 branch choice</td>
+  <td>How many + what subtasks</td>
+  <td>Full delegation, every step</td>
+  <td>Every step iteratively</td>
+</tr>
+<tr>
+  <td><strong>Worker pool</strong></td>
+  <td>Linear chain</td>
+  <td>Fixed branches (N pre-defined)</td>
+  <td>Usually 1 worker type, N parallel instances</td>
+  <td>Multiple specialists</td>
+  <td>Tool set</td>
+</tr>
+<tr>
+  <td><strong>Parallelism</strong></td>
+  <td>None</td>
+  <td>None (one branch wins)</td>
+  <td>Yes — all workers in parallel</td>
+  <td>Usually serial (manager decides)</td>
+  <td>None (sequential loop)</td>
+</tr>
+<tr>
+  <td><strong>LLM calls per run</strong></td>
+  <td>0 to K (per node)</td>
+  <td>1 + handler call</td>
+  <td>2 + N (orchestrator + workers + synth)</td>
+  <td>M × (manager + specialist) — variable</td>
+  <td>Unbounded (until tool_calls stop)</td>
+</tr>
+<tr>
+  <td><strong>Cost predictability</strong></td>
+  <td>Highest</td>
+  <td>High</td>
+  <td>Medium (N varies)</td>
+  <td>Low</td>
+  <td>Lowest</td>
+</tr>
+<tr>
+  <td><strong>Adaptability to input</strong></td>
+  <td>Lowest</td>
+  <td>Some (picks 1 of N)</td>
+  <td>High (N + content vary)</td>
+  <td>Highest (full delegation)</td>
+  <td>Highest (open-ended)</td>
+</tr>
+<tr>
+  <td><strong>Best framework fit</strong></td>
+  <td>LangGraph / vanilla Python</td>
+  <td>LangGraph conditional edges</td>
+  <td>LangGraph + Send API</td>
+  <td>CrewAI Process.hierarchical, AutoGen</td>
+  <td>LangGraph, Claude Agent SDK, OpenAI Agents SDK</td>
+</tr>
+<tr>
+  <td><strong>Use case</strong></td>
+  <td>Daily newsletter, ETL pipeline</td>
+  <td>Support triage, intent routing</td>
+  <td>Research, batch classification</td>
+  <td>Content production, code modification</td>
+  <td>Tool-using Q&amp;A, coding agent</td>
+</tr>
+<tr>
+  <td><strong>Key risk</strong></td>
+  <td>Brittle to input variation</td>
+  <td>LLM picks wrong branch</td>
+  <td>Bad decomposition wastes N workers</td>
+  <td>Manager loops indefinitely</td>
+  <td>Runaway loops, budget blowout</td>
+</tr>
+</table>
+
+<div class="summary">
+<strong>The senior framing in one paragraph:</strong> the five patterns form a spectrum from code-orchestrated (Sequential) to fully LLM-orchestrated (ReAct), with each step trading cost predictability for adaptability. Pick the LEAST LLM-orchestrated pattern that still solves your problem — every extra LLM decision is more tokens, more latency, and more places for the model to pick wrong. Sequential pipelines for known flows. Routers for fixed-branch decisions. Orchestrator-worker when the WHAT varies but the WHO is fixed. Supervisor when WHO matters and the agent pool is specialized. ReAct only when the flow is genuinely open-ended and tool composition is unpredictable.
+</div>
+
+<hr>
+<p style="color: #888; font-size: 0.85em; margin-top: 3em;">
+Document generated 2026-06-23 as part of the Agentic AI Engineering reference materials.
+Source: advanced_patterns/orchestration_patterns_overview.html
+</p>
+
+</body>
+</html>

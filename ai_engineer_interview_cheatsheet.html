@@ -71,6 +71,7 @@
   <a href="#embeddings">Embeddings</a>
   <a href="#rag">RAG</a>
   <a href="#llm-eval">LLM Evaluation</a>
+  <a href="#orchestration-patterns">Orchestration Patterns</a>
   <div class="section-label">P3 — ResearchBot</div>
   <a href="#langgraph">LangGraph — Core</a>
   <a href="#annotated">Annotated State</a>
@@ -946,6 +947,39 @@ citation_correct = <span class="kw">set</span>(expected).<span class="fn">issubs
   </ul>
 
   <!-- LANGGRAPH CORE -->
+  <!-- ORCHESTRATION PATTERNS QUICK REFERENCE -->
+  <h2 id="orchestration-patterns"><span class="tag">PATTERNS</span> Orchestration Patterns — quick reference</h2>
+
+  <p>Five framework-agnostic patterns covering ~95% of production agent flows. Unifying lens: <strong>who decides which step runs next?</strong></p>
+
+  <table>
+    <thead>
+      <tr><th>Pattern</th><th>LLM decides</th><th>Code decides</th><th>LangGraph</th><th>CrewAI</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Sequential Pipeline</strong></td><td>Nothing about flow</td><td>Everything (fixed order)</td><td><code>add_edge</code> chain</td><td><code>Process.sequential</code></td></tr>
+      <tr><td><strong>Conditional Router</strong></td><td>Which of N pre-defined branches</td><td>Set of options</td><td><code>add_conditional_edges</code></td><td>(rare)</td></tr>
+      <tr><td><strong>Orchestrator-Worker</strong></td><td>WHAT subtasks (how many)</td><td>WHO runs them, parallel</td><td>Send API + reducer</td><td>(manual)</td></tr>
+      <tr><td><strong>Supervisor / Hierarchical</strong></td><td>WHAT, WHO, WHEN</td><td>Agent pool</td><td>Build with cond edges</td><td><code>Process.hierarchical</code></td></tr>
+      <tr><td><strong>ReAct Loop</strong></td><td>Every step iteratively</td><td>Loop + tool definitions</td><td>Cyclic graph</td><td>Single-agent Crew</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Rule of thumb:</strong> pick the LEAST LLM-orchestrated pattern that solves your problem. Every LLM-driven decision = tokens, latency, and a place to pick wrong.</p>
+
+  <p><strong>Reference implementations in this repo:</strong></p>
+  <ul>
+    <li>Sequential Pipeline → <code>p3_researchbot/graph_intro.py</code>, <code>p5_reviewcrew/crew.py</code></li>
+    <li>Conditional Router → <code>p3_researchbot/research_bot.py</code></li>
+    <li>Orchestrator-Worker → <code>advanced_patterns/01_orchestrator_worker/pattern.py</code></li>
+    <li>Supervisor → <code>advanced_patterns/02_supervisor_crewai/pattern.py</code></li>
+    <li>ReAct → <code>p1_toolbot/agent.py</code>, <code>p4_stocksage/</code></li>
+    <li>Hub-and-Spoke (variant) → <code>p3_researchbot/hub_spoke.py</code></li>
+  </ul>
+
+  <p>Full deep-dive: <code>advanced_patterns/orchestration_patterns_overview.html</code> + Orchestration Patterns chapter of the study guide.</p>
+
+  <!-- LANGGRAPH CORE -->
   <h2 id="langgraph"><span class="tag">P3</span> LangGraph — Core</h2>
 
   <h3>What it is</h3>
@@ -1049,6 +1083,26 @@ metadata: Annotated[dict, operator.or_]</code></pre>
     <li><strong>Parallel branches</strong> — two nodes running concurrently race on the same dict</li>
   </ul>
   <div class="note"><strong>Mental model:</strong> treat state as read-only inside a node. Same pattern as React's <code>setState</code> — never mutate, return what changed.</div>
+
+  <h3>The echo-back trap — silent corruption (most common subtle bug)</h3>
+  <p>The delta should contain ONLY the keys you're contributing to this turn. Echoing unchanged reducer-keys back silently doubles their values via the reducer.</p>
+
+<pre><code><span class="cm"># Running state: {"search_queries": ["q0"], "findings": ["f0"], ...}</span>
+
+<span class="cm"># WRONG — "I'll just return the whole state, leave findings as-is"</span>
+<span class="kw">def</span> <span class="fn">buggy_node</span>(state):
+    <span class="kw">return</span> {
+        <span class="st">"search_queries"</span>: [<span class="st">"q1"</span>],            <span class="cm"># contributing</span>
+        <span class="st">"findings"</span>: state[<span class="st">"findings"</span>],        <span class="cm"># echoing back ["f0"]</span>
+    }
+<span class="cm"># Result: findings becomes ["f0", "f0"]  ❌ DOUBLED</span>
+<span class="cm"># Reducer can't distinguish "pass-through" from "contribution" — always appends.</span>
+
+<span class="cm"># CORRECT — omit keys you're not contributing to</span>
+<span class="kw">def</span> <span class="fn">good_node</span>(state):
+    <span class="kw">return</span> {<span class="st">"search_queries"</span>: [<span class="st">"q1"</span>]}    <span class="cm"># findings stays untouched</span></code></pre>
+
+  <p><strong>Rule:</strong> any reducer-key in your delta gets its value appended to the existing channel value. Replace-keys (no reducer) echoed back are wasteful but harmless. Reducer-keys echoed back are silent corruption.</p>
 
   <!-- CONDITIONAL EDGES -->
   <h2 id="conditional"><span class="tag">P3</span> Conditional Edges — Routing</h2>
@@ -1214,6 +1268,21 @@ result = app.<span class="fn">invoke</span>(<span class="kw">None</span>, config
     <li><code>"configurable"</code> — LangGraph's namespace for user runtime settings inside config dict</li>
     <li>Reusing same thread_id on re-run may skip Phase 1 — change thread_id or delete DB between tests</li>
   </ul>
+
+  <h3><code>app.get_state(config)</code> returns <code>StateSnapshot</code>, NOT a plain dict</h3>
+  <p>Common confusion: the TypedDict (e.g. <code>ResearchState</code>) is the schema of the state DICT — but <code>get_state</code> returns a wrapper around that dict, not the dict itself.</p>
+<pre><code>state = app.<span class="fn">get_state</span>(config)
+<span class="cm"># StateSnapshot is a NamedTuple with these fields:</span>
+state.values         <span class="cm"># ← THE channel state dict (your TypedDict shape)</span>
+state.next           <span class="cm"># tuple of next node name(s) — e.g. ("summarise",)</span>
+state.config         <span class="cm"># checkpoint config with thread_id + checkpoint_id</span>
+state.metadata       <span class="cm"># source, step, writes, etc.</span>
+state.created_at     <span class="cm"># timestamp</span>
+state.parent_config  <span class="cm"># pointer to parent checkpoint (enables time-travel)</span>
+
+findings = state.values[<span class="st">"findings"</span>]    <span class="cm"># ✅ correct</span>
+findings = state[<span class="st">"findings"</span>]            <span class="cm"># ❌ StateSnapshot doesn't subscript</span></code></pre>
+  <p>The wrapper exists because the snapshot needs to carry metadata (next-node pointer, parent link for time-travel) alongside the state itself. <code>TypedDict</code> = schema of the state. <code>StateSnapshot</code> = wrapper around the state with metadata. Easy to conflate.</p>
 
   <div class="good"><strong>Interview line:</strong> "I'd use LangGraph's interrupt_before with a MemorySaver checkpointer for dev HITL workflows — pause before a summarise or decision node, let a human review findings, inject edits via update_state, then resume with invoke(None, config)."</div>
 

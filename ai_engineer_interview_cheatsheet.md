@@ -1078,6 +1078,32 @@ Fall back to fine-tuning only when all 5 plateau.
 
 ---
 
+## Orchestration Patterns — quick reference
+
+Five framework-agnostic patterns covering ~95% of production agent flows. Unifying lens: **who decides which step runs next?**
+
+| Pattern | LLM decides | Code decides | LangGraph way | CrewAI way |
+|---|---|---|---|---|
+| **1. Sequential Pipeline** | Nothing about flow | Everything (fixed order) | `add_edge` chain | `Process.sequential` |
+| **2. Conditional Router** | Which of N pre-defined branches | Set of options | `add_conditional_edges` | (rare) |
+| **3. Orchestrator-Worker** | WHAT subtasks (how many) | WHO runs them, parallel | Send API + reducer | (manual chaining) |
+| **4. Supervisor / Hierarchical** | WHAT, WHO, WHEN | Agent pool | Build with cond edges | `Process.hierarchical` with `manager_agent` |
+| **5. ReAct Loop** | Every step iteratively | Loop + tool definitions | Cyclic graph | Single-agent Crew with tools |
+
+**Rule of thumb:** pick the LEAST LLM-orchestrated pattern that solves your problem. Every LLM-driven decision is tokens, latency, and a place to pick wrong.
+
+**Reference implementations:**
+- Sequential Pipeline → `p3_researchbot/graph_intro.py` and `p5_reviewcrew/crew.py`
+- Conditional Router → `p3_researchbot/research_bot.py` (route_summary)
+- Orchestrator-Worker → `advanced_patterns/01_orchestrator_worker/pattern.py`
+- Supervisor → `advanced_patterns/02_supervisor_crewai/pattern.py`
+- ReAct → `p1_toolbot/agent.py`, `p4_stocksage/`
+- Hub-and-Spoke (variant of fan-out) → `p3_researchbot/hub_spoke.py`
+
+Full deep-dive: `advanced_patterns/orchestration_patterns_overview.html` and the Orchestration Patterns chapter of `INTERVIEW_STUDY_GUIDE.html`.
+
+---
+
 ## LangGraph
 
 ### What it is
@@ -1145,6 +1171,29 @@ Why it breaks:
 
 Mental model: treat state as **read-only inside a node**. Return only what changed. Same pattern as React's `setState`.
 
+### The echo-back trap — silent corruption (most common subtle bug)
+
+The delta should contain **ONLY the keys you're contributing to this turn.** Echoing unchanged reducer-keys back silently doubles their values via the reducer.
+
+```python
+# Running state: {"search_queries": ["q0"], "findings": ["f0"], ...}
+
+# WRONG — "I'll just return the whole state, leave findings as-is"
+def buggy_node(state):
+    return {
+        "search_queries": ["q1"],            # contributing
+        "findings": state["findings"],        # echoing back ["f0"]
+    }
+# Result: findings becomes ["f0", "f0"]  ❌ DOUBLED
+# Reducer can't distinguish "pass-through" from "contribution" — always appends.
+
+# CORRECT — omit keys you're not contributing to
+def good_node(state):
+    return {"search_queries": ["q1"]}    # findings stays untouched
+```
+
+**Rule:** any reducer-key in your delta gets its value appended to the existing channel value. Replace-keys (no reducer) echoed back are wasteful but harmless. Reducer-keys echoed back are silent corruption.
+
 ### Execution flow
 ```
 invoke(initial_state)
@@ -1205,6 +1254,61 @@ print(app.get_graph().draw_mermaid())  # paste output into mermaid.live
 
 ---
 
+### Checkpointing — what it actually does (always-on, not just for HITL)
+
+The checkpointer fires on **EVERY node boundary**, not just at interrupts. After each node completes and its delta is merged, LangGraph writes a checkpoint unconditionally.
+
+**Each checkpoint stores:**
+- Full channel state at this point
+- Next-node pointer (which node would run next, or END)
+- Metadata (timestamp, run id, **parent checkpoint reference**)
+
+**The parent reference chains checkpoints backwards** — this is what enables time-travel:
+```
+chkpt_0 → chkpt_1 → chkpt_2 → chkpt_3 (interrupt) → chkpt_4 → END
+```
+
+`app.get_state_history(config)` returns the full ordered list. Re-running from chkpt_2 creates a NEW branch (Git-like) — original chain preserved.
+
+**The thread_id mental model — multi-user isolation:**
+```python
+# MemorySaver internal structure (conceptually)
+{
+    "alice": [chkpt_0, chkpt_1, chkpt_2, ...],   # alice's chain
+    "bob":   [chkpt_0, chkpt_1, ...],            # bob's chain
+}
+```
+One checkpointer instance, many threads. `thread_id` is the session key.
+
+**Production rule:** never hardcode `thread_id`. Set from user session, conversation UUID, or request context. Hardcoded "1" → silent cross-user contamination + HITL approvals leaking between sessions.
+
+**Backend swap — same API, three implementations:**
+```python
+# Dev / test
+from langgraph.checkpoint.memory import MemorySaver
+memory = MemorySaver()                                # in-process, lost on restart
+
+# Prod / single node
+from langgraph.checkpoint.sqlite import SqliteSaver
+memory = SqliteSaver.from_conn_string("checkpoints.db")
+
+# Prod / multi-replica
+from langgraph.checkpoint.postgres import PostgresSaver
+memory = PostgresSaver.from_conn_string("postgresql://...")
+
+# Graph code unchanged across all three
+graph.compile(checkpointer=memory)
+```
+
+**Production gap — cleanup is your job.** Checkpoints grow unbounded by design (every node × every user × every turn). Three patterns:
+- Per-thread TTL — delete chain after N days idle
+- Per-checkpoint TTL — keep recent K per thread, archive/delete older
+- Compaction — fold N consecutive checkpoints into one snapshot (Kafka log compaction style)
+
+LangGraph ships no cleanup. Write the cron job.
+
+**Systems-engineering framing for interviews:** the checkpoint chain IS **event sourcing applied to agent state**. Delta-return = event, chain = event log, channel state = materialized view, replay = invoke(None, config). Same pattern as Kafka + replay, Git, datomic, EventStore.
+
 ### HITL — Checkpointing, update_state, and resume
 
 **How it works:**
@@ -1226,10 +1330,27 @@ app.invoke(None, config)
 
 **Key mechanics:**
 - `thread_id` is the checkpoint key — same thread_id = same conversation/run
-- `interrupt_before=["node_name"]` — graph pauses BEFORE that node executes
-- `app.update_state(config, {...})` — writes directly into the checkpoint; next resume sees updated state
+- `interrupt_before=["node_name"]` — graph pauses BEFORE that node executes; `interrupt_after=[...]` pauses AFTER
+- `app.update_state(config, {...})` — writes directly into the checkpoint via reducers; next resume sees updated state
 - `app.invoke(None, config)` — `None` means "no new input, resume from checkpoint"
 - `MemorySaver` stores checkpoints in memory; use `SqliteSaver` / `PostgresSaver` for persistence
+
+**`app.get_state(config)` returns `StateSnapshot`, NOT a plain dict:**
+```python
+state = app.get_state(config)
+# StateSnapshot is a NamedTuple with these fields:
+state.values         # ← THE channel state dict (your TypedDict shape)
+state.next           # tuple of next node name(s) — e.g. ("summarise",)
+state.config         # checkpoint config with thread_id + checkpoint_id
+state.metadata       # source, step, writes, etc.
+state.created_at     # timestamp
+state.parent_config  # pointer to parent checkpoint (enables time-travel)
+
+# Common confusion: `state.values` is the dict, `state` is the wrapper.
+findings = state.values["findings"]    # ✅ correct
+findings = state["findings"]            # ❌ wrong — StateSnapshot doesn't subscript like that
+```
+The TypedDict (e.g. `ResearchState`) is the SCHEMA of `state.values`, not the return type of `get_state`. Easy to conflate. The wrapper exists because the snapshot needs to carry metadata (next-node pointer, parent link for time-travel) alongside the state itself.
 
 **Annotated reducers + update_state:**
 ```python
