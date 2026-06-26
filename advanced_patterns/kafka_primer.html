@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kafka Primer for Agentic Systems</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { useMaxWidth: true } });</script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 1100px;
+    margin: 2em auto;
+    padding: 0 2em;
+    line-height: 1.55;
+    color: #222;
+  }
+  h1 { color: #1a1a1a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.3em; }
+  h2 { color: #1a73e8; margin-top: 2.5em; padding: 0.4em 0.6em; background: #f0f7ff; border-left: 5px solid #1a73e8; }
+  h3 { color: #444; margin-top: 1.6em; }
+  h4 { color: #555; margin-top: 1.2em; margin-bottom: 0.4em; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em; overflow-x: auto; font-size: 0.9em; }
+  code { background: #f0f0f0; padding: 0.1em 0.35em; border-radius: 3px; font-family: "SF Mono", Consolas, monospace; font-size: 0.92em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+  th, td { border: 1px solid #d0d7de; padding: 0.5em 0.8em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  .mermaid { background: #fafbfc; padding: 1em; border-radius: 6px; text-align: center; margin: 1em 0; }
+  .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 12px 16px; margin: 14px 0; border-radius: 4px; font-style: italic; }
+  .why { background: #fff8e6; border-left: 4px solid #f9a825; padding: 12px 16px; margin: 12px 0; border-radius: 4px; }
+  .good { background: #e6f4ea; border-left: 4px solid #34a853; padding: 12px 16px; margin: 12px 0; border-radius: 4px; }
+  .bad { background: #fce8e6; border-left: 4px solid #ea4335; padding: 12px 16px; margin: 12px 0; border-radius: 4px; }
+  .note { background: #eef4ff; border-left: 4px solid #1a73e8; padding: 12px 16px; margin: 12px 0; border-radius: 4px; }
+  nav { background: #f0f7ff; padding: 0.8em 1.2em; border-radius: 6px; margin: 1em 0 2em 0; }
+  nav a { color: #1a73e8; margin-right: 1.2em; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>Kafka Primer for Agentic Systems</h1>
+
+<p><em>What every senior agent engineer needs to know about Kafka without becoming a streaming infra specialist. Anchored to <code>p3_researchbot/kafka_agents.py</code> — the Agent-as-Kafka-Consumer pattern.</em></p>
+
+<nav>
+  <strong>Sections:</strong>
+  <a href="#why">1. Why an agent on Kafka</a>
+  <a href="#model">2. The mental model</a>
+  <a href="#group_id">3. group_id</a>
+  <a href="#offsets">4. Offsets &amp; auto-commit</a>
+  <a href="#delivery">5. Delivery semantics</a>
+  <a href="#partitions">6. Partitions in depth</a>
+  <a href="#assign">7. Pinning consumers to partitions</a>
+  <a href="#pattern">8. The pattern</a>
+  <a href="#vs">9. Kafka vs alternatives</a>
+  <a href="#gotchas">10. Production gotchas</a>
+  <a href="#interview">11. Interview answer</a>
+</nav>
+
+<!-- ================================================================= -->
+<h2 id="why">1. Why put an agent behind Kafka at all?</h2>
+
+<p>In-process orchestrators (LangGraph, CrewAI) work great for <strong>one request, one process</strong>. They fall over once you need:</p>
+<ul>
+  <li><strong>Crash recovery</strong> — if the orchestrator dies mid-loop, partially-done work is lost</li>
+  <li><strong>Horizontal scale</strong> — one process can't keep up with bursts of requests</li>
+  <li><strong>Decoupled components</strong> — the team that owns intake shouldn't be coupled to the team that owns the model call</li>
+  <li><strong>Replay</strong> — re-process the last 24 hours of inputs through a new prompt version without re-collecting the inputs</li>
+  <li><strong>Audit</strong> — regulators want a durable record of every prompt the system ever saw</li>
+</ul>
+
+<p>Kafka gives you a durable, replay-able, partitioned commit log that decouples producers from consumers. Agents become long-running consumers on the log.</p>
+
+<div class="summary">
+  <strong>One-liner:</strong> Kafka turns the agent loop from "in-memory pipeline crashing on one bad input" into "durable event stream that any number of agent workers consume independently, can replay, and can scale horizontally without code changes."
+</div>
+
+<!-- ================================================================= -->
+<h2 id="model">2. The mental model — 5 primitives</h2>
+
+<table>
+  <thead>
+    <tr><th>Primitive</th><th>Plain English</th><th>In <code>kafka_agents.py</code></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Broker</strong></td><td>The Kafka server (or cluster) that stores messages on disk</td><td><code>BROKER = '192.168.1.156:30092'</code></td></tr>
+    <tr><td><strong>Topic</strong></td><td>A named, append-only log of messages — the unit of pub-sub</td><td><code>research-tasks</code>, <code>research-findings</code></td></tr>
+    <tr><td><strong>Partition</strong></td><td>A topic is split into N partitions (parallelism + ordering scope)</td><td>1 partition (default — fine for demo)</td></tr>
+    <tr><td><strong>Producer</strong></td><td>Writes messages to a topic</td><td><code>KafkaProducer(...)</code> in <code>producer()</code></td></tr>
+    <tr><td><strong>Consumer</strong></td><td>Reads messages from a topic, tracked by <code>group_id</code></td><td><code>KafkaConsumer(TASKS_TOPIC, group_id=...)</code></td></tr>
+  </tbody>
+</table>
+
+<div class="mermaid">
+flowchart LR
+  P[producer<br/>publishes tasks] -->|TASKS_TOPIC| B[(Kafka broker<br/>durable log)]
+  B -->|news-group| A1[consumer: news]
+  B -->|technical-group| A2[consumer: technical]
+  B -->|examples-group| A3[consumer: examples]
+  A1 -->|FINDINGS_TOPIC| B2[(Kafka broker)]
+  A2 -->|FINDINGS_TOPIC| B2
+  A3 -->|FINDINGS_TOPIC| B2
+  B2 -->|aggregator-group| AG[aggregator]
+</div>
+
+<div class="why">
+  <strong>Key insight:</strong> Kafka is not a queue, it's a <strong>commit log</strong>. Messages are <em>not</em> deleted when consumed — they stick around for the retention period (hours, days, or forever for compacted topics). Consumers just track <em>their position</em> in the log. This is what makes replay possible.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="group_id">3. <code>group_id</code> — the single most important concept</h2>
+
+<p>Kafka tracks the read position per <strong>(group_id, topic, partition)</strong> tuple. The same broker holds many independent positions:</p>
+
+<pre><code>Internal "where am I" table:
+  ('news-group',       'research-tasks',    partition=0) → offset 42
+  ('technical-group',  'research-tasks',    partition=0) → offset 42
+  ('examples-group',   'research-tasks',    partition=0) → offset 42
+  ('aggregator-group', 'research-findings', partition=0) → offset 17
+</code></pre>
+
+<h3>Two patterns you're choosing between</h3>
+
+<h4>Pattern A — Different <code>group_id</code> per consumer → <strong>broadcast / fan-out</strong></h4>
+<p>What <code>kafka_agents.py</code> does. Each group is an independent reader; every group sees every message.</p>
+<pre><code>consumer('news')       # group_id='news-group'       sees ALL 3 tasks
+consumer('technical')  # group_id='technical-group'  sees ALL 3 tasks
+consumer('examples')   # group_id='examples-group'   sees ALL 3 tasks
+                       # each filters by task['agent'] == agent_type</code></pre>
+
+<h4>Pattern B — Same <code>group_id</code> across N consumers → <strong>queue / load balancing</strong></h4>
+<p>Run the same consumer process 3 times with the same group_id; Kafka assigns each partition to exactly one of them. Each message goes to exactly one consumer. This is how you horizontally scale a single agent type.</p>
+<pre><code>KafkaConsumer('research-tasks', group_id='news-group')  # worker 1
+KafkaConsumer('research-tasks', group_id='news-group')  # worker 2
+KafkaConsumer('research-tasks', group_id='news-group')  # worker 3
+                                # 3 partitions → 1 per worker
+                                # each task processed by exactly 1 worker</code></pre>
+
+<table>
+  <thead><tr><th>Goal</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td>N agent types each independently reading the same stream</td><td>Different <code>group_id</code> per type</td></tr>
+    <tr><td>Horizontally scale one agent type to N workers</td><td>Same <code>group_id</code>, N consumer processes</td></tr>
+    <tr><td>Two independent observers (main + audit logger)</td><td>Different <code>group_id</code>s</td></tr>
+    <tr><td>Re-process everything from scratch</td><td>Brand-new <code>group_id</code> + <code>auto_offset_reset='earliest'</code></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Mental model:</strong> <code>group_id</code> = subscriber identity in pub-sub, and the unit of work-sharing for scale-out. <strong>One name = one logical reader.</strong>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="offsets">4. Offsets and commit semantics</h2>
+
+<p>The <strong>offset</strong> is the message position. Every message in a partition gets a strictly-increasing offset (0, 1, 2, ...). A consumer says "I've finished processing up to offset N" by <strong>committing</strong> that offset to Kafka. On restart, the consumer resumes from the committed offset.</p>
+
+<h3>"Where is the commit?" — auto-commit is the answer</h3>
+<p>In <code>kafka_agents.py</code> there is no explicit <code>c.commit()</code> call. The <code>KafkaConsumer</code> constructor defaults to two parameters that drive a background commit thread:</p>
+<table>
+  <thead><tr><th>Parameter</th><th>Default</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>enable_auto_commit</code></td><td><code>True</code></td><td>Background thread commits offsets on a timer</td></tr>
+    <tr><td><code>auto_commit_interval_ms</code></td><td><code>5000</code></td><td>The interval — every 5 seconds</td></tr>
+  </tbody>
+</table>
+<p>So in code with these defaults, every 5 seconds the client silently tells the broker "I've processed up to offset N," <strong>without you writing any commit code.</strong></p>
+
+<div class="bad">
+<strong>The auto-commit trap — silently weaker than at-least-once.</strong>
+<pre><code>for msg in c:                       # consumer reads message at offset 42
+    task = msg.value
+    # 5 seconds tick by. Auto-commit fires in the background.
+    # Broker now thinks offset 42 is "done".
+
+    findings = ddgs.text(...)       # but you're still processing
+    # CRASH HERE
+
+    p.send(FINDINGS_TOPIC, ...)     # finding never published</code></pre>
+On restart: last committed offset = 42 → consumer picks up at offset 43 → <strong>offset 42's work is lost.</strong> This is at-most-once behavior, dressed up as at-least-once. The bug is invisible until it bites you.
+</div>
+
+<h3>Manual commit (production discipline)</h3>
+<pre><code>c = KafkaConsumer(..., enable_auto_commit=False)   # disable the timer
+for msg in c:
+    result = process(msg)             # do the work
+    publish_result(result)             # side effect succeeds
+    c.commit()                         # only now mark as done</code></pre>
+<p>Commit <em>after</em> the side effect succeeds. If you crash before commit, the message is redelivered on restart — losing nothing but doing duplicate work. <strong>This is true at-least-once delivery.</strong> Combine it with an idempotent processor (dedupe by a stable key) and you get effectively-exactly-once results.</p>
+
+<div class="good">
+  <strong>Senior framing:</strong> "At-least-once" is the <em>contract</em> Kafka gives you when you commit correctly. With default auto-commit, you don't get that contract — you get a race between processing time and the 5-second commit timer. The first thing to do on a production consumer is set <code>enable_auto_commit=False</code> and call <code>commit()</code> after every successful piece of work.
+</div>
+
+<h3><code>auto_offset_reset</code> — the "fresh group" gotcha</h3>
+<p>When a <code>group_id</code> is brand new (Kafka has never seen it before, has no committed offset), it has to decide where to start. That's what <code>auto_offset_reset</code> controls:</p>
+<ul>
+  <li><code>'earliest'</code> — start from the very first message in the topic. Great for demos and replay.</li>
+  <li><code>'latest'</code> (default) — only see messages produced <em>after</em> you joined. What production usually wants.</li>
+</ul>
+<p>Once the group has committed even one offset, <code>auto_offset_reset</code> never fires again — Kafka resumes from the committed position.</p>
+
+<div class="why">
+  <strong>This is also how you replay:</strong> pick a brand-new <code>group_id</code> + <code>'earliest'</code>, and you re-read the entire topic from the start. No data movement, no exports. The reason ML teams love Kafka — re-evaluate every input under a new prompt by spinning up a new consumer group.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="delivery">5. Delivery semantics — the three guarantees</h2>
+
+<table>
+  <thead><tr><th>Guarantee</th><th>How you get it</th><th>What you give up</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>At-most-once</strong></td>
+      <td>Commit <em>before</em> processing. Crash → message lost.</td>
+      <td>Reliability (you may lose work)</td>
+    </tr>
+    <tr>
+      <td><strong>At-least-once</strong></td>
+      <td>Commit <em>after</em> processing. Crash → message reprocessed.</td>
+      <td>Idempotence required (your processor must tolerate duplicates)</td>
+    </tr>
+    <tr>
+      <td><strong>Exactly-once</strong></td>
+      <td>Kafka transactions: produce+commit in one atomic step (idempotent producer + transactional consumer).</td>
+      <td>Complexity + ~10-30% throughput hit</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>For agent systems, at-least-once is almost always the right choice.</strong> LLM calls are expensive but idempotent if you key your work properly (use the message offset or a deterministic <code>task_id</code> as the cache key, dedupe outputs by that key downstream).</p>
+
+<div class="good">
+  <strong>Practical pattern:</strong> at-least-once delivery + idempotent processing = effectively exactly-once results, without paying the transactional throughput tax. This is what production agent systems actually run.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="partitions">6. Partitions in depth</h2>
+
+<p>A <strong>topic</strong> is not a single log file — it is an abstraction over <strong>N parallel log files</strong> called partitions. Each partition is its own append-only log with its own offset counter.</p>
+
+<pre><code>Topic "research-tasks" with 3 partitions:
+
+  partition 0:  [msg0] [msg1] [msg2] [msg3] [msg4]   →  offsets 0, 1, 2, 3, 4
+  partition 1:  [msg0] [msg1] [msg2]                 →  offsets 0, 1, 2
+  partition 2:  [msg0] [msg1] [msg2] [msg3]          →  offsets 0, 1, 2, 3</code></pre>
+
+<ul>
+  <li>Each partition has its own offset counter starting at 0. <strong>Offset 0 in partition 0 is a different message from offset 0 in partition 1.</strong></li>
+  <li>A "topic" doesn't physically exist — only its partitions do. The topic is a logical grouping name.</li>
+  <li>Messages are spread across partitions by the producer.</li>
+</ul>
+
+<h3>The ordering guarantee</h3>
+<div class="note">
+  <strong>Messages are strictly ordered within a partition. There is no ordering guarantee across partitions.</strong>
+</div>
+<p>This is partition-scoped, not topic-scoped, not group-scoped. Inside one partition, offsets 0 → 1 → 2 → 3 are read in strict order by every consumer. Across partitions, a message in partition 0 at offset 5 may have been produced <em>before</em> a message in partition 1 at offset 2, yet a consumer reading both may see partition 1's message first. Coordinating a global order would defeat the entire point of partitioning.</p>
+
+<h3>How the producer assigns a message to a partition — card dealer vs. assigned seating</h3>
+
+<h4>Case A — no key: round-robin (card dealer)</h4>
+<pre><code>p.send('research-tasks', value=msg)   # no key
+# Kafka cycles through partitions in order:
+#   msg1 → partition 0    msg5 → partition 0
+#   msg2 → partition 1    msg6 → partition 1
+#   msg3 → partition 2    msg7 → partition 2
+#   msg4 → partition 3    msg8 → partition 3</code></pre>
+<p>Even distribution, predictable. But ordering is lost — msg5 may be processed by a different consumer than msg1 even though the producer sent them in that order.</p>
+
+<h4>Case B — with key: <code>hash(key) % N</code> (assigned seating)</h4>
+<pre><code>p.send('research-tasks', key='user_42'.encode(), value=msg)
+# Kafka computes partition = hash('user_42') % num_partitions
+# user_42's messages ALWAYS go to the same partition.
+
+  msg1 (user_42)  → hash → partition 2
+  msg2 (user_07)  → hash → partition 0
+  msg3 (user_42)  → hash → partition 2     ← always here
+  msg4 (user_99)  → hash → partition 3
+  msg5 (user_42)  → hash → partition 2     ← always here</code></pre>
+<p>Same customer goes to the same seat, every time. Deterministic. This is the trick that gives Kafka both per-tenant ordering AND horizontal parallelism: <code>user_42</code>'s messages stay strictly ordered (one partition, one consumer reads in offset order), while <code>user_42</code> and <code>user_99</code> can be processed by different consumers in parallel.</p>
+
+<div class="why">
+  <strong>The dominant pattern for multi-tenant agent systems:</strong> <code>key=tenant_id</code>. Per-tenant ordering for free, horizontal scale up to <code>num_partitions</code> consumers per group. This is the load-bearing reason production agent systems pick Kafka over a queue.
+</div>
+
+<h3>Setting the number of partitions</h3>
+<p>Partitions are set <strong>at topic creation time</strong>. Two ways:</p>
+
+<h4>CLI (most common)</h4>
+<pre><code>kafka-topics.sh --bootstrap-server localhost:9092 \
+  --create \
+  --topic research-tasks \
+  --partitions 12 \
+  --replication-factor 3</code></pre>
+<p><code>--partitions 12</code> = 12 parallel logs. <code>--replication-factor 3</code> = each partition copied to 3 brokers for durability (unrelated to parallelism, just safety).</p>
+
+<h4>Programmatic (Python AdminClient)</h4>
+<pre><code>from kafka.admin import KafkaAdminClient, NewTopic
+
+admin = KafkaAdminClient(bootstrap_servers='192.168.1.156:30092')
+admin.create_topics([
+    NewTopic(name='research-tasks', num_partitions=12, replication_factor=1)
+])</code></pre>
+
+<div class="bad">
+  <strong>The auto-create gotcha.</strong> If a producer publishes to a topic that doesn't exist, Kafka auto-creates it using the broker's <code>num.partitions</code> default — typically <strong>1</strong>. That's why <code>kafka_agents.py</code>'s topics ended up with 1 partition: never explicitly created, the producer's first <code>p.send()</code> auto-created with the broker default. Silent 1× parallelism cap forever. Production discipline: set <code>auto.create.topics.enable=false</code> on the broker and require explicit topic provisioning.
+</div>
+
+<div class="warn">
+  <strong>Adding partitions later is painful.</strong> You can ADD partitions to an existing topic, but you can never REMOVE them. And adding partitions changes the key→partition mapping (<code>hash(key) % 12</code> ≠ <code>hash(key) % 24</code>) — so <code>user_42</code>'s messages that used to go to partition 7 may suddenly go to partition 19, breaking per-user ordering for in-flight messages. <strong>Pick partition count generously up front.</strong> 12, 24, 48 are common starting points.
+</div>
+
+<h3>Consumer assignment within a group</h3>
+<p>Now the parallelism rule snaps into place:</p>
+<div class="note">
+  <strong>Within a consumer group, each partition is assigned to exactly ONE consumer at a time.</strong> Never two. This preserves the per-partition ordering guarantee.
+</div>
+
+<h4>1 consumer in the group → that consumer owns all partitions</h4>
+<pre><code>Topic with 12 partitions + group 'news-group' has 1 consumer:
+  partitions 0-11  →  consumer A   (reads from all 12)</code></pre>
+<p>The consumer multiplexes across partitions internally — your <code>for msg in c:</code> loop sees a stream of messages from whichever partition has data ready. You don't see which partition each came from unless you check <code>msg.partition</code>.</p>
+
+<h4>Add a second consumer → Kafka triggers a rebalance</h4>
+<pre><code>Before:
+  partitions 0-11  →  consumer A
+
+After adding consumer B (rebalance fires):
+  partitions 0-5   →  consumer A
+  partitions 6-11  →  consumer B</code></pre>
+<p>Add a third → ~4 partitions each. Per-consumer load drops as you scale workers — until you hit the partition count.</p>
+
+<h4>More consumers than partitions → excess sit idle</h4>
+<pre><code>Topic with 4 partitions + group 'news-group' has 6 consumers:
+  partition 0  →  consumer A
+  partition 1  →  consumer B
+  partition 2  →  consumer C
+  partition 3  →  consumer D
+  consumer E, F  →  IDLE (no partition to claim)</code></pre>
+<p><strong>Partitions are the upper bound on consumer parallelism per group.</strong> If you anticipate scaling to 8 workers, create the topic with at least 8 partitions up front.</p>
+
+<h3>The hot-partition trap</h3>
+<p>The flip side of deterministic hashing: if 90% of your traffic is from one customer, 90% goes to one partition. That partition's consumer gets overwhelmed while the others sit idle.</p>
+<ul>
+  <li><strong>Mitigation 1:</strong> key by a more granular dimension — <code>hash(user_id + conversation_id)</code> instead of just <code>user_id</code></li>
+  <li><strong>Mitigation 2:</strong> for tenant-isolated workloads, run separate topics per tenant</li>
+  <li><strong>Mitigation 3:</strong> custom partitioner that detects hot keys and spreads them (rare, complex)</li>
+</ul>
+
+<!-- ================================================================= -->
+<h2 id="assign">7. Pinning consumers to specific partitions</h2>
+
+<p>Default group-managed assignment is fine for general-purpose consumer fleets where workers are interchangeable. But sometimes you want "consumer X always owns partition Y" — for stateful per-tenant agents, GPU-pinned workers, or replay debugging. Three paths, in order of how often they're used:</p>
+
+<h3>Path A — <code>assign()</code> instead of <code>subscribe()</code> (manual, deterministic)</h3>
+
+<pre><code>from kafka import TopicPartition, KafkaConsumer
+
+def partition_for(key, num_partitions):
+    return abs(hash(key)) % num_partitions
+
+target = partition_for('user_42', num_partitions=12)
+
+c = KafkaConsumer(
+    bootstrap_servers='...',
+    # NOTE: no group_id — going outside consumer groups
+    value_deserializer=lambda m: json.loads(m.decode())
+)
+c.assign([TopicPartition('chat-events', target)])   # claim partition 2
+
+for msg in c:
+    # This consumer reads ONLY partition 2.
+    # user_42's messages are guaranteed to flow through here.
+    handle(msg)</code></pre>
+
+<table>
+  <thead><tr><th></th><th><code>subscribe()</code> (group-managed)</th><th><code>assign()</code> (manual)</th></tr></thead>
+  <tbody>
+    <tr><td>Partition assignment</td><td>Kafka coordinator decides</td><td>You decide explicitly</td></tr>
+    <tr><td>Rebalance on consumer join/leave</td><td>Yes, automatic</td><td>No — assignment is static</td></tr>
+    <tr><td><code>group_id</code> needed</td><td>Yes</td><td>No (optional)</td></tr>
+    <tr><td>Offset commits</td><td>Per-(group, partition) automatic</td><td>Manual if you want persistence</td></tr>
+    <tr><td>Scaling</td><td>Add/remove consumers, Kafka redistributes</td><td>You manage the binding yourself</td></tr>
+  </tbody>
+</table>
+
+<div class="good"><strong>Use <code>assign()</code> when:</strong>
+  <ul>
+    <li>Stateful per-tenant agents — "the <code>user_42</code> chat agent" holds in-memory state, reads only <code>user_42</code>'s partition</li>
+    <li>Sharded workers with hardware pinning (worker 0 owns GPU 0 and partition 0)</li>
+    <li>Debugging or replay — point one consumer at one partition and step through</li>
+  </ul>
+</div>
+
+<div class="bad"><strong>Don't use <code>assign()</code> when:</strong>
+  <ul>
+    <li>Workers are interchangeable — let the group manage it</li>
+    <li>You want automatic failover — if your <code>assign()</code> consumer dies, no one picks up its partition</li>
+  </ul>
+</div>
+
+<h3>Path B — Custom <code>partition_assignment_strategy</code> (group-managed, custom mapping)</h3>
+<p>If you want group benefits (automatic rebalance, failover, offset coordination) but also want "consumer X always owns partition Y" within the group, write a custom assignor:</p>
+<pre><code>from kafka.coordinator.assignors.abstract import AbstractPartitionAssignor
+
+class TenantPinnedAssignor(AbstractPartitionAssignor):
+    name = 'tenant-pinned'
+    version = 0
+
+    def assign(self, cluster, members):
+        # Honor each member's preferred partition list, fall back to even
+        # distribution if conflicts. Implementation is fiddly.
+        ...
+
+    def metadata(self, topics):
+        return ConsumerProtocolMemberMetadata(
+            self.version,
+            list(topics),
+            user_data=encode({'desired_partitions': [2, 5]})
+        )
+
+c = KafkaConsumer(
+    'chat-events',
+    group_id='chat-group',
+    partition_assignment_strategy=[TenantPinnedAssignor],
+)</code></pre>
+<p><strong>Rare in practice.</strong> Writing a correct group-aware assignor is hard — it must handle membership churn and produce the same assignment on every member without coordination beyond the coordinator. 95% of real systems use <code>assign()</code> when they need pinning, default assignor when they don't.</p>
+
+<h3>Path C — Per-tenant <code>group_id</code> (the "broadcast + filter" pattern)</h3>
+<pre><code># Spawn one consumer per tenant, each with its own group_id.
+# Each group reads ALL messages on the topic, filters in code.
+
+c = KafkaConsumer(
+    'chat-events',
+    group_id=f'tenant-{tenant_id}-group',   # unique per tenant
+)
+for msg in c:
+    if msg.key.decode() != tenant_id:
+        continue   # filter — drops ~99% of messages at high traffic
+    handle(msg)</code></pre>
+<p>This is exactly what <code>kafka_agents.py</code> does — three different <code>group_id</code>s, each filters by content. Fine for a 3-message demo, <strong>wastes resources at scale</strong> because every group reads every message and discards most.</p>
+
+<h3>The recommended pattern for production</h3>
+<pre><code># 1. Topic 'research-tasks' with N partitions
+# 2. Producer keys by routing dimension
+p.send(TASKS_TOPIC, key=agent_type.encode(), value=msg)
+
+# 3. One consumer group per agent type
+# 4. Within each group, scale workers up to partitions assigned to that type
+c = KafkaConsumer(
+    TASKS_TOPIC,
+    group_id='news-group',
+    enable_auto_commit=False,    # manual commit
+)</code></pre>
+<p>You get per-agent ordering, independent fan-out across agent types, horizontal scaling within each agent type, and real at-least-once delivery — without ever calling <code>assign()</code>. The <code>group_id</code> + key combination handles the pinning cleanly.</p>
+
+<div class="why">
+  <strong>Senior takeaway:</strong> reach for <code>assign()</code> only when a specific worker truly must be pinned to a specific partition for state-locality reasons. Otherwise, the right answer is "key by tenant + group_id per consumer type" — Kafka does the binding for you and you get failover for free.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="pattern">8. The Agent-as-Kafka-Consumer pattern</h2>
+
+<p>Three roles, each a long-running process:</p>
+
+<div class="mermaid">
+flowchart TD
+  P[producer process<br/>publishes 3 tasks] -->|research-tasks| T[(broker)]
+  T --> N[news_agent<br/>group_id=news-group<br/>filters task.agent==news]
+  T --> Tech[technical_agent<br/>group_id=technical-group<br/>filters task.agent==technical]
+  T --> E[examples_agent<br/>group_id=examples-group<br/>filters task.agent==examples]
+  N -->|finding| F[(research-findings)]
+  Tech -->|finding| F
+  E -->|finding| F
+  F --> AG[aggregator<br/>group_id=aggregator-group<br/>dedup by agent name<br/>stop after 3]
+</div>
+
+<h3>Why the design is this way</h3>
+<ul>
+  <li><strong>Three different <code>group_id</code>s on TASKS_TOPIC</strong> → each agent type independently reads all tasks, then filters by content (<code>task['agent'] == agent_type</code>). This is fan-out by content, not by partition.</li>
+  <li><strong>Aggregator on a different topic + its own <code>group_id</code></strong> → independent reader of findings, doesn't compete with anyone.</li>
+  <li><strong><code>for msg in c</code> is a blocking iterator</strong> — it polls the broker and yields each message in turn. This <em>is</em> the agent's main loop. The process runs forever (or until SIGTERM).</li>
+</ul>
+
+<h3>The pattern's strength: failure isolation</h3>
+<p>Kill the <code>news_agent</code> process. The other two keep working. <code>news_agent</code>'s offsets stay committed; restart and it picks up where it left off — no data loss, no coordination required. This is the kind of failure-isolation in-process orchestrators can't give you.</p>
+
+<!-- ================================================================= -->
+<h2 id="vs">9. Kafka vs the alternatives</h2>
+
+<table>
+  <thead><tr><th>System</th><th>When to pick over Kafka</th><th>Tradeoff</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>LangGraph / CrewAI in-process</strong></td>
+      <td>Single request, single process, no replay needed</td>
+      <td>No durability, no horizontal scale, no audit log</td>
+    </tr>
+    <tr>
+      <td><strong>Redis Streams</strong></td>
+      <td>Lightweight, already running Redis, &lt;1M msgs/day</td>
+      <td>Smaller ecosystem, weaker partitioning, no exactly-once</td>
+    </tr>
+    <tr>
+      <td><strong>SQS / Cloud Pub/Sub</strong></td>
+      <td>You want managed, don't want to operate Kafka</td>
+      <td>SQS has no replay; Pub/Sub costs more at scale</td>
+    </tr>
+    <tr>
+      <td><strong>Celery + RabbitMQ</strong></td>
+      <td>Task queue semantics dominate; Python-native</td>
+      <td>Messages disappear when ack'd — no replay; harder to fan-out</td>
+    </tr>
+    <tr>
+      <td><strong>Temporal</strong></td>
+      <td>Long-running stateful workflows with retries, sleeps, signals</td>
+      <td>Different mental model — workflow durability vs event log</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="why">
+  <strong>The senior framing:</strong> Kafka is <em>not</em> a queue. It's a durable, replay-able commit log. Pick it when you need replay, multi-consumer fan-out, audit, or partitioned parallelism. Pick a queue (SQS, Celery) when you only need task dispatch and the message has zero value after it's processed.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="gotchas">10. Production gotchas</h2>
+
+<h4>Rebalance storms</h4>
+<p>When a consumer in a group joins or leaves, Kafka triggers a <strong>rebalance</strong> — partition assignments shuffle across the surviving group members. During rebalance, no consumer in the group is reading. If your consumers crash often (OOM, deploy, scaling event), rebalances cascade. Mitigation: <code>session_timeout_ms</code>, <code>heartbeat_interval_ms</code>, sticky-partition assignor.</p>
+
+<h4>Hot partitions</h4>
+<p>If one user generates 90% of traffic and you key by user_id, one partition becomes a hotspot while others sit idle. Pick a key with high cardinality, or hash by (user_id, sub_id) to spread one user's traffic across multiple partitions <em>at the cost of order within that user</em>.</p>
+
+<h4>Schema evolution</h4>
+<p>Messages live in the log for the retention period. The consumer that reads tomorrow's messages may also need to read last week's messages. Use Schema Registry (Avro/Protobuf) or Pydantic with backward-compatible field defaults. Never make a non-nullable field required without a migration plan.</p>
+
+<h4>Dead-letter queue (DLQ)</h4>
+<p>What happens when a message can't be processed (malformed JSON, LLM keeps failing)? Without a DLQ, the consumer retries forever and blocks the partition. Production pattern: after N failed retries, publish the bad message to a <code>$topic.dlq</code> topic and commit the offset. A separate human-driven process inspects the DLQ.</p>
+
+<h4>Idempotence keys</h4>
+<p>At-least-once delivery means duplicates happen. If your agent makes an LLM call costing $0.30 and downstream writes to a DB, deduplicate by a stable key (message offset, deterministic <code>task_id</code>) before doing the expensive work. Otherwise budget for 10–20% duplicate spend on bursty workloads.</p>
+
+<h4>Auto-commit vs at-least-once mismatch</h4>
+<p>The <code>kafka_agents.py</code> in this repo uses default <code>enable_auto_commit=True</code> — fine for a demo, wrong for production. The auto-commit timer can advance the offset <em>before</em> the LLM call and finding publish complete. Production: disable auto-commit, call <code>c.commit()</code> after each finding is successfully published.</p>
+
+<h4>Auto-create-topics silent scale ceiling</h4>
+<p>If a producer publishes to a topic that doesn't exist, Kafka auto-creates it with the broker's <code>num.partitions</code> default — typically <strong>1</strong>. The system works fine for months, then can't scale because adding more consumers to the group does nothing past the first one. Fix: set <code>auto.create.topics.enable=false</code> on the broker and provision topics explicitly with the partition count your future scale will need.</p>
+
+<!-- ================================================================= -->
+<h2 id="interview">11. Interview answer — the 90-second version</h2>
+
+<div class="summary">
+"Kafka is a durable, partitioned commit log — not a queue. The mental model is five primitives: brokers store topics, topics are <em>actually N parallel partitions</em>, producers append messages, consumers track their position via offsets keyed by <code>group_id</code>. The single most important concept is <code>group_id</code>: same <code>group_id</code> across N consumers gives you load-balanced queue semantics — each partition assigned to exactly one consumer, so partition count is the upper bound on parallelism. Different <code>group_id</code>s give you broadcast pub-sub. Ordering is guaranteed <em>within a partition</em>, not across — so you key by whatever needs strict order, typically <code>tenant_id</code> for multi-tenant agents, which gives you per-tenant ordering and horizontal parallelism in the same primitive. Offsets are committed to mark progress; default is at-least-once, but only if you commit correctly — the auto-commit timer is a silent at-most-once trap because it can commit before your processing finishes. Production discipline: disable auto-commit, call <code>commit()</code> after the side effect, design idempotent processors. For agent systems, the killer feature is replay: spin up a new <code>group_id</code> with <code>auto_offset_reset='earliest'</code> and you re-process every input under a new prompt version with zero data movement. When you need a specific worker pinned to a specific partition for state-locality reasons — stateful per-tenant agents, GPU-pinned workers — reach for <code>assign()</code> instead of <code>subscribe()</code>; otherwise the <code>group_id</code>+key combination handles binding cleanly. The pattern I built in P3 — Agent-as-Kafka-Consumer — has three long-running consumers each on a different <code>group_id</code> reading the same <code>research-tasks</code> topic and filtering by content, then publishing findings to a second topic the aggregator consumes. Production gotchas to know: rebalance storms, hot partitions, schema evolution, dead-letter queues, auto-commit trap, and the auto-create-topics-with-1-partition silent scale ceiling."
+</div>
+
+</body>
+</html>

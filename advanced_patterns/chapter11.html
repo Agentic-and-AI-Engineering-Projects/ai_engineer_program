@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chapter 11 — Multi-Agent Systems</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 920px; margin: 2.5em auto; padding: 0 2em 4em 2em;
+         line-height: 1.68; color: #1f2430; font-size: 17px; }
+  h1 { color: #0f172a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.4em; font-size: 2em; margin-bottom: 0.2em; }
+  .subtitle { color: #555; font-style: italic; margin-top: 0.3em; margin-bottom: 2em; font-size: 1.05em; }
+  h2 { color: #1a73e8; margin-top: 2.6em; padding: 0.45em 0.7em; background: #f0f7ff;
+       border-left: 5px solid #1a73e8; border-radius: 0 4px 4px 0; font-size: 1.4em; }
+  h3 { color: #1a3a6c; margin-top: 1.9em; font-size: 1.18em; }
+  h4 { color: #2c3e50; margin-top: 1.3em; margin-bottom: 0.4em; font-size: 1.04em; }
+  p { color: #1f2430; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em;
+        overflow-x: auto; font-size: 0.92em; line-height: 1.5; margin: 1em 0; }
+  code { background: #f0f0f0; padding: 0.08em 0.32em; border-radius: 3px;
+         font-family: "SF Mono", Consolas, monospace; font-size: 0.92em; }
+  pre code { background: none; padding: 0; font-size: 1em; }
+  table { border-collapse: collapse; width: 100%; margin: 1.3em 0; font-size: 0.96em; }
+  th, td { border: 1px solid #d0d7de; padding: 0.6em 0.85em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  nav.toc { background: #f8fafc; border: 1px solid #d0e0f5; border-radius: 8px;
+            padding: 1.2em 1.5em; margin: 1.5em 0 2.5em 0; }
+  nav.toc h3 { margin: 0 0 0.6em 0; font-size: 1em; color: #1a3a6c; text-transform: uppercase; letter-spacing: 0.05em; }
+  nav.toc ol { margin: 0; padding-left: 1.5em; }
+  nav.toc li { margin: 0.3em 0; }
+  nav.toc a { color: #1a73e8; text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  .callout { padding: 1em 1.3em; margin: 1.2em 0; border-radius: 4px; border-left: 4px solid; }
+  .note { background: #eef4ff; border-color: #1a73e8; }
+  .why  { background: #fff8e6; border-color: #f9a825; }
+  .good { background: #e6f4ea; border-color: #34a853; }
+  .bad  { background: #fce8e6; border-color: #ea4335; }
+  .opening { font-size: 1.08em; line-height: 1.7; background: #fafbfc;
+             padding: 1.4em 1.6em; border-left: 5px solid #1a73e8; border-radius: 0 6px 6px 0; margin: 1.5em 0 2.5em 0; }
+  blockquote { border-left: 4px solid #ccc; margin: 1.2em 0; padding: 0.3em 1.2em; color: #555; font-style: italic; }
+  .code-caption { font-size: 0.88em; color: #666; margin: -0.6em 0 0.3em 0; font-style: italic; }
+  hr { border: none; border-top: 1px solid #d0d7de; margin: 3em 0; }
+</style>
+</head>
+<body>
+
+<h1>Chapter 11 — Multi-Agent Systems</h1>
+<p class="subtitle">When one agent is no longer enough — and how to know whether you've actually reached that point.</p>
+
+<div class="opening">
+  Picture a single Claude Sonnet call with a 2,000-token system prompt that says: <em>"You are a legal research assistant. Extract facts from the document, identify relevant precedents, write a memo. Output JSON."</em> It works for a small document. It hallucinates citations on a medium one. On a long one it loses track of which fact came from which paragraph and the memo conflates two unrelated cases. The output is fluent and confidently wrong.
+  <br><br>
+  The natural reaction is to make the prompt longer — add cautions, examples, citation rules. The prompt grows to 4,000 tokens. The hallucinations get more sophisticated but no rarer. Eventually someone on the team writes "we need to split this into stages" and the conversation about multi-agent systems begins.
+  <br><br>
+  This chapter is about what that split actually looks like, why it works, what it costs, and — just as important — when it doesn't help.
+</div>
+
+<nav class="toc">
+  <h3>What you'll learn</h3>
+  <ol>
+    <li><a href="#what-it-is">What "multi-agent" actually means</a></li>
+    <li><a href="#why">Why you'd ever build one (and when you shouldn't)</a></li>
+    <li><a href="#four-questions">The four questions every multi-agent design answers</a></li>
+    <li><a href="#topologies">The four canonical topologies</a>
+      <ol>
+        <li><a href="#sw">Supervisor-Worker</a></li>
+        <li><a href="#pipeline">Typed Pipeline</a></li>
+        <li><a href="#debate">Debate</a></li>
+        <li><a href="#swarm">Swarm (fan-out / fan-in)</a></li>
+      </ol>
+    </li>
+    <li><a href="#variants">Variants worth knowing</a></li>
+    <li><a href="#plumbing">The plumbing nobody talks about</a></li>
+    <li><a href="#production">A production-grade walkthrough</a></li>
+    <li><a href="#anti">The anti-patterns</a></li>
+    <li><a href="#decision">Picking a topology — a decision framework</a></li>
+    <li><a href="#interview">Interview takeaways</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================== -->
+<h2 id="what-it-is">1. What "multi-agent" actually means</h2>
+
+<p>A <strong>multi-agent system</strong> is one where the work of answering a single user request is split across two or more LLM calls that have <em>different roles</em>. The split can be along several dimensions:</p>
+
+<ul>
+  <li><strong>By specialization</strong> — one agent extracts, another reasons, another writes. Each has a focused system prompt.</li>
+  <li><strong>By perspective</strong> — multiple agents argue the same question from different angles, then a synthesizer integrates the results.</li>
+  <li><strong>By scale</strong> — N parallel copies of the same agent process N independent tasks.</li>
+  <li><strong>By trust level</strong> — a fact-checker agent validates a generator agent's output before it reaches the user.</li>
+</ul>
+
+<p>What this is <em>not</em>:</p>
+
+<ul>
+  <li><strong>A single agent that calls many tools</strong> is not multi-agent. The agent is one LLM with one persona; tools are passive functions. ReAct loops with 20 tool calls still count as one agent.</li>
+  <li><strong>Sequential prompt chains in a notebook</strong> are not really multi-agent in the production sense — they're a multi-stage pipeline. Whether you call it "multi-agent" is mostly framing, but the distinction matters when interviewers probe.</li>
+  <li><strong>Calling the same model with different temperatures</strong> is not multi-agent. It's sampling.</li>
+</ul>
+
+<p>The cleanest test: <em>can the LLM calls in your system be described as different "people" with different jobs?</em> If yes, it's multi-agent. If they're all the same persona doing different turns of a conversation, it's not.</p>
+
+<!-- ============================================================== -->
+<h2 id="why">2. Why you'd ever build one — and when you shouldn't</h2>
+
+<p>Multi-agent systems are popular in conference talks and rare in well-run production deployments. There's a reason for the gap.</p>
+
+<h3>The case <em>for</em> multi-agent</h3>
+
+<p>Three failure modes of single-agent systems push teams toward multi-agent:</p>
+
+<p><strong>(1) System-prompt sprawl.</strong> When one agent has to be researcher + reasoner + writer + critic, each role pulls its system prompt in a different direction. The "be cautious" tone the critic needs undermines the "be confident" tone the writer needs. Splitting roles into separate agents lets each prompt stay focused, and quality climbs noticeably.</p>
+
+<p><strong>(2) Failure isolation.</strong> If a single-agent pipeline produces a malformed citation in the writing stage, you have nothing — the agent's earlier extraction work and reasoning live only in the conversation history, mixed with the broken final output. If those stages are separate agents with structured handoffs, you can re-run only the failing stage with the previous stage's output intact. The blast radius of a failure shrinks from "whole task" to "one stage."</p>
+
+<p><strong>(3) Specialization beats generalization at quality ceilings.</strong> A focused 400-token system prompt for "extract facts as JSON with relevance scoring" outperforms a generalist 2,000-token prompt that has extraction as one of its responsibilities. This isn't because the model is dumber — it's because the focused prompt has more room for examples, edge-case handling, and output schema, all of which raise quality.</p>
+
+<h3>The case <em>against</em></h3>
+
+<p>Three things multi-agent systems cost you:</p>
+
+<p><strong>(1) Latency.</strong> A 3-stage pipeline is roughly 3× the latency of a single call. If your user expects a 2-second response, a 6-second response feels broken, even if the answer is better. Many production systems are latency-sensitive in ways the engineers building them don't intuitively feel.</p>
+
+<p><strong>(2) Cost.</strong> Tokens are spent on every stage's system prompt, every handoff serialization, every revalidation. Cost typically grows 2–5× when going from single-agent to a 3-stage multi-agent system, and that's before retries.</p>
+
+<p><strong>(3) Debugging surface.</strong> A single agent has one conversation history to inspect. A multi-agent system has N conversations, M handoffs, intermediate schemas, retry logic, and the question "which stage actually went wrong?" becomes a diagnostic project. Production teams that don't invest in tracing infrastructure spend disproportionate time chasing intermediate-stage bugs that look like final-output bugs.</p>
+
+<div class="bad">
+<strong>The honest senior heuristic:</strong> default to single-agent. Escalate to multi-agent only when you can <em>name the specific failure mode</em> that escalation solves — not "the output isn't quite right" but "the system prompt is trying to be researcher AND writer and the tones conflict" or "when the writing stage fails I lose the extraction stage's output and have to rerun everything." If you can't name the failure mode, the multi-agent rewrite probably won't help.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="four-questions">3. The four questions every multi-agent design answers</h2>
+
+<p>Before picking a topology, every multi-agent system implicitly or explicitly answers four design questions. Asking them out loud is the easiest way to think clearly about what you're building.</p>
+
+<h3>Q1. Who decides what happens next?</h3>
+
+<p>Possible answers and what they imply:</p>
+
+<table>
+  <thead><tr><th>Answer</th><th>Implication</th><th>Pattern name</th></tr></thead>
+  <tbody>
+    <tr><td>Plain Python code</td><td>Deterministic, predictable, easy to test</td><td>Pipeline, Swarm</td></tr>
+    <tr><td>A coordinator LLM</td><td>Flexible, can handle unanticipated paths</td><td>Supervisor-Worker, Dynamic Handoff</td></tr>
+    <tr><td>The worker agents themselves</td><td>Maximum flexibility, hardest to reason about</td><td>Debate, Swarm-with-handoff</td></tr>
+  </tbody>
+</table>
+
+<p>This is the most fundamental choice, and it tracks closely with how much the workflow varies between requests. If every request follows the same shape, code routing wins. If requests vary unpredictably, LLM routing wins despite its cost.</p>
+
+<h3>Q2. How do the agents share information?</h3>
+
+<p>Two clean approaches and one messy one:</p>
+
+<ul>
+  <li><strong>Structured handoffs.</strong> Stage 1 returns a typed object (Pydantic model, JSON schema), stage 2 takes it as input. No shared mutable state. Each handoff is auditable and re-runnable.</li>
+  <li><strong>Shared scratchpad.</strong> All agents read and append to a common message log. Easy to start, hard to scale — agents start polluting each other's context with irrelevant detail.</li>
+  <li><strong>(The messy one) Global Python state.</strong> Workers mutate a shared dict. Now you have data races on top of LLM nondeterminism. Avoid.</li>
+</ul>
+
+<p>In production, the right answer is almost always typed handoffs. The shared scratchpad is fine for short-lived chains; global state is almost always a mistake.</p>
+
+<h3>Q3. What happens when a stage fails?</h3>
+
+<p>"Fails" here means several distinct things:</p>
+
+<ul>
+  <li>The LLM returned malformed JSON that didn't validate against the schema.</li>
+  <li>The LLM call itself errored (rate limit, transient API failure, timeout).</li>
+  <li>The LLM returned valid JSON but the content is wrong (hallucinated citation, missed an extraction).</li>
+  <li>The agent went into an infinite tool-use loop.</li>
+</ul>
+
+<p>Each needs a different response. Schema failures often justify retry-with-feedback ("your output didn't include a 'source' field for fact #3, please reformat"). Transient errors retry with exponential backoff. Content errors typically need a verifier agent (and acceptance that some will get through). Loops need an iteration cap.</p>
+
+<p>A multi-agent system that doesn't explicitly model failure handling per stage is a multi-agent system that surfaces every failure as a user-visible disaster.</p>
+
+<h3>Q4. What does the user see, and when?</h3>
+
+<p>Single-agent systems are easy here: stream the response. Multi-agent systems have intermediate stages the user often shouldn't see (extraction JSON is not interesting; it's a scaffold for the final memo). The decisions:</p>
+
+<ul>
+  <li>Show only the final output? Simpler UX, but a 10-second wait feels broken.</li>
+  <li>Show intermediate stages as "thinking" steps? More transparent but exposes implementation detail.</li>
+  <li>Stream the final stage character-by-character once earlier stages complete? Best UX but harder to build.</li>
+</ul>
+
+<p>Most production systems land on option 3 — earlier stages run silently with a progress indicator ("Researching precedents…"), and the final stage streams. Worth deciding consciously rather than defaulting to whichever is easiest.</p>
+
+<!-- ============================================================== -->
+<h2 id="topologies">4. The four canonical topologies</h2>
+
+<p>Once you've answered the four design questions, you almost always land on one of four shapes. Each has a distinct feel and a distinct best-fit use case.</p>
+
+<!-- -------- SUPERVISOR-WORKER -------- -->
+<h3 id="sw">4.1 Supervisor-Worker</h3>
+
+<p>One coordinator dispatches sequenced sub-tasks to specialist agents and assembles their outputs into a final answer. This is by far the most common multi-agent pattern in production — roughly 70% of deployed multi-agent systems are some variant of it.</p>
+
+<p><strong>The mental model:</strong> the supervisor is a project manager. The workers are individual contributors with specific skills. The supervisor knows the shape of the work, hands off to the right specialist, validates what comes back, and chains it forward.</p>
+
+<p><strong>A key sub-decision:</strong> is the supervisor itself an LLM, or is it deterministic Python?</p>
+
+<ul>
+  <li><strong>Deterministic supervisor:</strong> a Python function calls worker A, then B, then C, in that order, every time. Simple, fast, testable. Use when the workflow doesn't vary between requests.</li>
+  <li><strong>LLM supervisor:</strong> a coordinator LLM decides which worker to call next based on the current state. Flexible, handles unanticipated routing, but adds latency, cost, and an LLM decision point to debug. Use when the workflow varies meaningfully.</li>
+</ul>
+
+<p>Here's a deterministic supervisor — the simplest version, applied to the legal-research example from the opening:</p>
+
+<pre><code>EXTRACTOR_SYSTEM = """You are a legal document analyst. Given a document
+excerpt, extract key facts. Output JSON: {"facts": [{"fact", "source", "relevance"}]}"""
+
+RESEARCHER_SYSTEM = """You are a legal research specialist. Given case facts,
+identify relevant precedents. Output JSON: {"precedents": [...]}"""
+
+WRITER_SYSTEM = """You are a legal memo writer. Given facts + precedents,
+draft a 3-5 paragraph memo with Background, Key Facts, Precedents, Analysis."""
+
+def run_worker(system, user_message, model="claude-sonnet-4-6"):
+    response = client.messages.create(
+        model=model, max_tokens=2048, system=system,
+        messages=[{"role": "user", "content": user_message}])
+    return response.content[0].text
+
+def run_pipeline(document):
+    # The supervisor is plain Python here — no LLM.
+    facts = json.loads(run_worker(EXTRACTOR_SYSTEM, f"Extract: {document}"))
+    precedents = json.loads(run_worker(RESEARCHER_SYSTEM,
+        f"Find precedents for: {json.dumps(facts)}"))
+    memo = run_worker(WRITER_SYSTEM,
+        f"Write memo. Facts: {json.dumps(facts)}\nPrecedents: {json.dumps(precedents)}")
+    return memo
+</code></pre>
+
+<p>Three small things to notice in this code that matter at scale:</p>
+
+<ul>
+  <li>Each system prompt is short and focused. None of them have to do everyone else's job.</li>
+  <li>The handoffs are JSON. <code>json.loads</code> will throw on malformed output — that's failure isolation at the stage boundary. In production you'd catch the <code>JSONDecodeError</code> and retry just this stage with a schema-correction prompt.</li>
+  <li>The supervisor doesn't appear as an LLM call in this code. It's a Python function. Cheaper, faster, more testable than an LLM-routed version.</li>
+</ul>
+
+<p>When you'd swap in an LLM supervisor: when the user's request type can't be classified upfront. ("Should I extract first, or do I need to summarize the document first because it's too long? Should I call the researcher twice with different sub-queries? Should I escalate to a human review?") A coordinator LLM can decide; deterministic Python cannot, without itself becoming a sprawling decision tree.</p>
+
+<div class="why">
+<strong>When supervisor-worker works:</strong> heterogeneous expertise the same model can't do well in one prompt, an auditable routing trail (regulated industries love this — "show me which agent made this decision"), and workflows where you want to swap one specialist without retesting the others.
+<br><br>
+<strong>When it doesn't:</strong> tasks that are inherently a single chain of thought (math problems, code generation for small functions) where breaking up the thinking loses more than it gains.
+</div>
+
+<!-- -------- PIPELINE -------- -->
+<h3 id="pipeline">4.2 Typed Pipeline</h3>
+
+<p>A pipeline is supervisor-worker's deterministic case taken to its logical conclusion: a fixed linear sequence of stages, each receiving a typed object from the prior stage and emitting a typed object to the next. There's no LLM coordinator; there's a Python pipeline runner.</p>
+
+<p>The difference from a casual three-call chain is the word <em>typed</em>. The handoffs use Pydantic schemas (or equivalent). Stage 2 will never receive malformed input from stage 1 because the schema validates at the boundary. If validation fails, you have a precise error message naming which field is broken — and you can retry just stage 1 with the schema error as feedback ("your output didn't include a 'relevance' field, valid values are 'high', 'medium', 'low'").</p>
+
+<pre><code>from pydantic import BaseModel, ValidationError
+from typing import Literal
+
+class Fact(BaseModel):
+    fact: str
+    source: str
+    relevance: Literal["high", "medium", "low"]
+
+class FactList(BaseModel):
+    facts: list[Fact]
+
+def extract_facts(document: str) -> FactList:
+    raw = run_worker(EXTRACTOR_SYSTEM, f"Extract: {document}")
+    try:
+        return FactList.model_validate_json(raw)
+    except ValidationError as e:
+        # Retry once with the schema error as feedback
+        feedback = f"Your output failed schema validation: {e}. Please fix and re-emit."
+        raw = run_worker(EXTRACTOR_SYSTEM, f"{feedback}\n\nExtract: {document}")
+        return FactList.model_validate_json(raw)
+</code></pre>
+
+<p>Why this matters more than it looks: <strong>without schemas, malformed intermediate output silently corrupts downstream stages and bugs surface only at the final user-visible artifact, miles from the root cause.</strong> Half the production multi-agent disasters in the field trace back to "we passed a freeform string between stages and stage 3 misinterpreted it."</p>
+
+<p>Schemas also enable a clean failure model. Each stage either produces a valid typed object or raises. Retries can be precisely targeted. Logging captures structured intermediate state, not raw LLM text. Observability tools can show you the schema-validated artifact from any stage with one click.</p>
+
+<div class="good">
+<strong>The single most underrated practice in multi-agent engineering</strong> is using Pydantic (or JSON Schema, or Protobuf) for inter-stage handoffs. If a multi-agent system in a job interview has freeform string handoffs, the candidate is showing you their tutorial-grade understanding, not their production grade.
+</div>
+
+<!-- -------- DEBATE -------- -->
+<h3 id="debate">4.3 Debate</h3>
+
+<p>Debate is multi-agent built around the assumption that <em>multiple perspectives surface more blind spots than one</em>. N agents independently answer the same question from different framings, then critique each other's answers, then a synthesizer produces a final unified response.</p>
+
+<p>The structure has three phases:</p>
+
+<ol>
+  <li><strong>Independent proposals.</strong> Each debater gets the same question with a different perspective prompt — "you are an analytical analyst," "you are a skeptical analyst," "you are a contrarian," "you are an empiricist who demands data." Answers are produced in parallel.</li>
+  <li><strong>Cross-critique.</strong> Each debater is shown the other proposals and asked to identify factual errors, logical gaps, and missing evidence.</li>
+  <li><strong>Synthesis.</strong> A final synthesizer integrates the proposals and critiques into a single well-reasoned answer.</li>
+</ol>
+
+<pre><code>def run_debate(question: str, n_debaters: int = 4) -> str:
+    perspectives = ["analytical", "skeptical", "contrarian", "empirical"]
+
+    # Phase 1: Independent proposals (parallel)
+    proposals = [
+        run_worker(f"You are a {p} analyst. Answer with evidence and reasoning.", question)
+        for p in perspectives[:n_debaters]
+    ]
+
+    # Phase 2: Cross-critique
+    critiques = []
+    for i, proposal in enumerate(proposals):
+        others = [p for j, p in enumerate(proposals) if j != i]
+        critique = run_worker(
+            "You are a rigorous critic. Identify factual errors, logical gaps, "
+            "and missing evidence in the following proposal.",
+            f"Proposal: {proposal}\n\nOther perspectives:\n{json.dumps(others)}")
+        critiques.append(critique)
+
+    # Phase 3: Synthesis
+    return run_worker(
+        "Integrate these proposals and critiques into a single well-reasoned answer.",
+        f"Question: {question}\nProposals: {proposals}\nCritiques: {critiques}")
+</code></pre>
+
+<p>Debate's big risk: <strong>verbose-but-empty output</strong>. If the synthesizer prompt is weak ("pick the best answer"), the result is bland averaging — the synthesizer hedges and outputs something like "as the analytical perspective notes, X, while the skeptical perspective raises Y." This adds tokens without adding value.</p>
+
+<p>The synthesizer's prompt is where debate either becomes powerful or becomes expensive theater. A strong rubric makes the difference:</p>
+
+<blockquote>
+"Identify which proposals contain claims contradicted by their cited evidence. Discard those claims. For remaining claims, weight by the strength of supporting evidence. Where proposals disagree on factual matters, side with the one citing authoritative sources. Where they disagree on judgment matters, present the stronger argument from each side."
+</blockquote>
+
+<p>That kind of synthesizer takes the diversity of debate and converges it into a sharper answer than any single perspective would have produced.</p>
+
+<div class="note">
+<strong>When to use debate:</strong> high-stakes decisions where blind spots matter more than latency — investment analysis, regulatory interpretation, medical second opinion, security threat modeling. Don't use debate for routine tasks; the latency and cost don't pencil.
+</div>
+
+<!-- -------- SWARM -------- -->
+<h3 id="swarm">4.4 Swarm (fan-out / fan-in)</h3>
+
+<p>The simplest multi-agent topology. You have N independent tasks and one worker function. You dispatch all N tasks in parallel, collect the results, and return.</p>
+
+<pre><code>import concurrent.futures
+from typing import Callable
+
+def run_swarm(tasks: list[str], worker_fn: Callable[[str], str],
+              max_workers: int = 5) -> list[dict]:
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(worker_fn, t): t for t in tasks}
+        for future in concurrent.futures.as_completed(futures):
+            task = futures[future]
+            try:
+                results.append({"task": task, "result": future.result(), "ok": True})
+            except Exception as e:
+                results.append({"task": task, "result": str(e), "ok": False})
+    return results
+</code></pre>
+
+<p>There's no coordinator decision-making here. The "multi-agent" framing is generous — it's really one agent template applied N times in parallel. But the pattern shows up so often it's worth naming.</p>
+
+<p>When swarm fits:</p>
+
+<ul>
+  <li>Summarize 1,000 customer reviews.</li>
+  <li>Translate 500 documents.</li>
+  <li>Classify every record in a batch.</li>
+  <li>Generate alt-text for 10,000 images.</li>
+</ul>
+
+<p>What swarm requires:</p>
+
+<ul>
+  <li><strong>Task independence.</strong> Worker N's output must not depend on worker M's output. If they do, you have a pipeline, not a swarm.</li>
+  <li><strong>Rate-limit awareness.</strong> 1,000 parallel API calls will get you instantly rate-limited. <code>max_workers</code> should reflect your provider's actual concurrency limit, not the size of your task list.</li>
+  <li><strong>Failure isolation.</strong> One failed worker shouldn't take down the batch. The example above wraps each future in a try/except so the batch returns partial success.</li>
+</ul>
+
+<div class="why">
+<strong>Subtle distinction:</strong> swarm vs LangGraph's "Send API." LangGraph's Send pattern spawns parallel branches whose results are merged via a reducer into a single state. That's structurally the same as swarm but adds graph-level reasoning about state merging. Both are fan-out/fan-in; LangGraph's version is more disciplined about how results recombine.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="variants">5. Variants worth knowing</h2>
+
+<p>The four canonical patterns above cover most production designs, but three variants come up often enough to be worth naming.</p>
+
+<h3>5.1 LLM-routed supervisor (dynamic handoff)</h3>
+
+<p>A supervisor-worker variant where the supervisor LLM decides which specialist to call based on the user's current question. This is what OpenAI's Agents SDK and Anthropic's swarm-style designs call <em>handoffs</em>. Use when intent classification is non-trivial — the user's request can plausibly need any of N specialists, and the routing rule is too complex to write as Python.</p>
+
+<h3>5.2 Hierarchical supervisor (supervisor of supervisors)</h3>
+
+<p>For very complex tasks, supervisors themselves can be specialists managed by a top-level supervisor. "Legal research supervisor" coordinates an extractor, researcher, and writer. "Financial analysis supervisor" coordinates its own team. A top-level coordinator routes the user's request to the right supervisor first, then that supervisor coordinates its workers. CrewAI's hierarchical process is exactly this.</p>
+
+<h3>5.3 Shared scratchpad</h3>
+
+<p>Some pipelines have agents share a free-form notes section that grows across stages. The extractor leaves a note like "couldn't find date for fact #3, check secondary source." The researcher reads the note and tries the secondary source. This is the messiest of the variants — easy to start, hard to scale, prone to context bloat. Useful when the inter-stage coordination is genuinely fuzzy and structured handoffs would lose nuance. Avoid as a default.</p>
+
+<!-- ============================================================== -->
+<h2 id="plumbing">6. The plumbing nobody talks about</h2>
+
+<p>The conference talks focus on the topology diagrams. Production teams spend most of their time on the plumbing. Five things you'll build into every real multi-agent system:</p>
+
+<h3>6.1 Schema validation at every handoff</h3>
+
+<p>Covered above. The single highest-leverage piece of plumbing.</p>
+
+<h3>6.2 Idempotency keys</h3>
+
+<p>When stage 2 fails and you retry, you want the retry to be safe even if stage 2 actually succeeded but the success was lost in a network glitch. Each stage gets an idempotency key derived from the inputs (e.g., a hash of stage 1's output). If the downstream side (database write, external API) sees a duplicate idempotency key, it returns the cached result rather than re-executing. This is the same pattern Stripe uses for payments. In multi-agent systems with side effects (writing to databases, calling external tools that cost money), this is non-negotiable.</p>
+
+<h3>6.3 Retry with exponential backoff and a kill switch</h3>
+
+<p>Distinguish three failure classes and handle each differently:</p>
+
+<ul>
+  <li><strong>Schema violation</strong> — retry the same stage with the validation error as feedback. Cap at 2 retries; if it can't produce valid output, escalate to a human or fall back to a degraded response.</li>
+  <li><strong>Transient infra error</strong> (rate limit, 503) — retry with exponential backoff (1s, 2s, 4s, 8s). Cap at 4 retries.</li>
+  <li><strong>Persistent failure</strong> — after retries exhausted, write the task to a dead-letter queue with all upstream context preserved. The task is re-runnable later without losing any earlier-stage work.</li>
+</ul>
+
+<h3>6.4 Tracing and observability</h3>
+
+<p>Every stage's input, output, latency, model version, and prompt version should be logged. Tools like LangSmith, LangFuse, Arize Phoenix make this turnkey. Without it, debugging a multi-agent system is opening N tabs in N consoles and correlating timestamps by hand.</p>
+
+<h3>6.5 Cost and rate-limit budgets</h3>
+
+<p>A multi-agent system can quietly consume 5–10× the tokens of its single-agent equivalent. You want per-request token budgets and per-tenant rate limits. When budgets are hit, the system should degrade gracefully (skip the optional verifier stage) rather than fail.</p>
+
+<!-- ============================================================== -->
+<h2 id="production">7. A production-grade walkthrough</h2>
+
+<p>To make the plumbing concrete, here's what a hardened version of the legal-research supervisor looks like — the same shape as the simple example earlier, but with the production discipline baked in:</p>
+
+<pre><code>from pydantic import BaseModel, ValidationError
+import hashlib, time, logging
+
+class Fact(BaseModel):
+    fact: str; source: str; relevance: Literal["high","medium","low"]
+
+class FactList(BaseModel):
+    facts: list[Fact]
+
+class Precedent(BaseModel):
+    name: str; relevance: str; principle: str
+
+class PrecedentList(BaseModel):
+    precedents: list[Precedent]
+
+class Memo(BaseModel):
+    background: str; key_facts: str; precedents: str; analysis: str
+
+
+def stage(name: str, system: str, user: str, schema: type[BaseModel],
+          max_retries: int = 2) -> BaseModel:
+    """Run one stage with schema validation, targeted retry, and tracing."""
+    idempotency_key = hashlib.sha256(f"{name}:{user}".encode()).hexdigest()[:16]
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        logging.info(f"stage={name} attempt={attempt} key={idempotency_key}")
+        start = time.time()
+        try:
+            raw = run_worker(system, user)
+            result = schema.model_validate_json(raw)
+            logging.info(f"stage={name} OK latency_ms={int((time.time()-start)*1000)}")
+            return result
+        except ValidationError as e:
+            last_error = e
+            user = (f"Your previous output failed schema validation:\n{e}\n\n"
+                    f"Please fix and re-emit. Original task:\n{user}")
+        except Exception as e:
+            # Transient — exponential backoff
+            time.sleep(2 ** attempt)
+            last_error = e
+
+    raise RuntimeError(f"stage {name} failed after {max_retries} retries: {last_error}")
+
+
+def run_pipeline(document: str) -> Memo:
+    facts = stage("extractor", EXTRACTOR_SYSTEM, f"Extract: {document}", FactList)
+    precedents = stage("researcher", RESEARCHER_SYSTEM,
+                       f"Find precedents for: {facts.model_dump_json()}", PrecedentList)
+    memo = stage("writer", WRITER_SYSTEM,
+                 f"Write memo. Facts: {facts.model_dump_json()}\n"
+                 f"Precedents: {precedents.model_dump_json()}", Memo)
+    return memo
+</code></pre>
+
+<p>Read that code with the four design questions in mind:</p>
+
+<ul>
+  <li><strong>Who decides what happens next?</strong> Python (deterministic). Three stages, fixed order.</li>
+  <li><strong>How do agents share information?</strong> Typed handoffs. <code>FactList</code> → <code>PrecedentList</code> → <code>Memo</code>. No shared mutable state.</li>
+  <li><strong>What happens when a stage fails?</strong> Schema failures retry with the validation error as feedback. Transient errors retry with backoff. Persistent failures raise — caller should catch and dead-letter.</li>
+  <li><strong>What does the user see?</strong> The final <code>Memo</code>. Intermediate stages log but don't surface unless you wire them into a progress stream.</li>
+</ul>
+
+<p>That's the shape every production-grade multi-agent system converges toward. The novel work is in the prompts and schemas; the orchestration code looks remarkably similar across teams.</p>
+
+<!-- ============================================================== -->
+<h2 id="anti">8. The anti-patterns</h2>
+
+<p>Five things teams build into their multi-agent systems that they should stop doing.</p>
+
+<h3>8.1 Freeform string handoffs</h3>
+
+<p>"Stage 1 emits a paragraph, stage 2 reads the paragraph." Surfaces broken downstream output as final-user disasters. Always use typed handoffs.</p>
+
+<h3>8.2 The chatty supervisor</h3>
+
+<p>An LLM supervisor where every routing decision is a 1,500-token deliberation. Costs more than the actual work. Either make the supervisor deterministic Python or reduce it to a single classification call ("which specialist?") rather than open-ended reasoning.</p>
+
+<h3>8.3 Cargo-cult debate</h3>
+
+<p>Wrapping a routine task in a 4-debater + critique + synthesis loop because "more agents = more quality." For most tasks, you've added 5× cost and 3× latency for marginal quality improvement. Debate earns its cost only on high-stakes decisions where blind spots matter.</p>
+
+<h3>8.4 No idempotency</h3>
+
+<p>Side effects (database writes, external API calls) happen on every retry without an idempotency key. The first time a network blip retries a successful stage, you get double-writes and duplicate records.</p>
+
+<h3>8.5 The hidden 11th agent</h3>
+
+<p>A team adds agents one at a time. After six months the system has 11 LLM calls per user request. No one remembers exactly what agent 7 is doing or whether agents 4 and 9 are redundant. Periodic system audits — "can we collapse stages 3 and 4? does stage 7 still earn its cost?" — prevent this. Every agent in a production system should have a justified, named role.</p>
+
+<!-- ============================================================== -->
+<h2 id="decision">9. Picking a topology — a decision framework</h2>
+
+<p>If you've gotten this far and still aren't sure which pattern fits your problem, work through these questions in order:</p>
+
+<ol>
+  <li><strong>Can you actually do this with a single agent?</strong> Try it first. If it works, ship it. Multi-agent is a tax — pay it only when you must.</li>
+  <li><strong>Are your tasks independent and parallel?</strong> If yes → <em>Swarm</em>. Done.</li>
+  <li><strong>Is the workflow the same shape every time?</strong> If yes → <em>Typed Pipeline</em> with deterministic Python orchestration.</li>
+  <li><strong>Does the workflow vary, but along a small set of known branches?</strong> If yes → <em>Supervisor-Worker</em> with a deterministic supervisor that picks one branch based on input features.</li>
+  <li><strong>Does the workflow vary unpredictably with the user's request?</strong> If yes → <em>Supervisor-Worker with an LLM supervisor</em>, accepting the latency and cost.</li>
+  <li><strong>Is this a high-stakes decision where blind spots are a known failure mode?</strong> If yes, and only then → consider <em>Debate</em> as a top-level wrapper.</li>
+</ol>
+
+<p>Most production multi-agent systems are some flavor of #3 or #4. Debate (#6) is rare in well-run production but common in research papers. Swarm (#2) is extremely common but often dismissed as "not really multi-agent."</p>
+
+<!-- ============================================================== -->
+<h2 id="interview">10. Interview takeaways</h2>
+
+<p>The senior framing condensed into one paragraph, ready for live delivery:</p>
+
+<div class="why">
+"I default to single-agent and escalate to multi-agent only when I can name the specific failure mode it solves — usually specialization sprawl or failure isolation, sometimes both. When I do go multi-agent, the first thing I decide is who controls flow: code, an LLM supervisor, or the agents themselves. That single choice determines whether I'm building a pipeline, a supervisor-worker, or a debate system. The plumbing — typed handoffs with schemas, per-stage retry semantics, idempotency keys, observability, cost budgets — matters more than the topology. Most production multi-agent failures I've debugged trace back to freeform string handoffs or missing failure isolation, not the wrong topology choice."
+</div>
+
+<h3>The three questions interviewers probe</h3>
+
+<p><strong>"Walk me through what happens when stage 2 of your pipeline fails."</strong> Strong answer covers the three failure classes (schema, transient, persistent) and the distinct retry policy for each, plus what gets dead-lettered with what upstream context preserved.</p>
+
+<p><strong>"Why didn't you just use a single agent?"</strong> The honest answer names the failure mode multi-agent solved. "The single-agent system prompt was conflating extraction and writing tone — extraction needed comprehensive listing, writing needed selective synthesis, and the model averaged the two badly." Vague answers ("it was better") signal cargo-cult adoption.</p>
+
+<p><strong>"How do you decide whether to use an LLM as the supervisor?"</strong> Strong answer: cost and predictability. If the routing logic can be written in 20 lines of Python without becoming spaghetti, the deterministic supervisor wins. If it can't, the LLM supervisor earns its cost. The dimension that matters is workflow variance, not problem complexity.</p>
+
+<h3>The trap question</h3>
+
+<p><strong>"How would you scale this multi-agent system to 100× traffic?"</strong> Junior answer: "add more workers." Senior answer: "Question whether the multi-agent design is still the right one at scale — many designs that win at 10 QPS lose at 1,000 QPS because the cumulative latency and cost shift the tradeoff. Specifically, I'd revisit whether the supervisor-worker pattern can be partially collapsed into a single agent with better prompting, whether some stages can be cached, whether the swarm stages can be batched into single API calls, and whether the debate pattern is still earning its cost or whether a single agent with a constitutional check is now sufficient. Scale forces re-examination of the topology, not just horizontal worker addition."</p>
+
+<hr>
+<p style="text-align: center; color: #666; font-style: italic; margin-top: 2em;">
+End of Chapter 11. Companion code: <code>advanced_patterns/agentic-ai-bible/chapters/ch11/</code>. Next chapter: <a href="chapter12.html">Human-in-the-Loop</a> (to be written).
+</p>
+
+</body>
+</html>

@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vector Databases &amp; RAG Internals</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 1100px; margin: 2em auto; padding: 0 2em 4em 2em;
+         line-height: 1.6; color: #222; font-size: 16px; }
+  h1 { color: #1a1a1a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.35em; }
+  h2 { color: #1a73e8; margin-top: 2.5em; padding: 0.4em 0.7em; background: #f0f7ff;
+       border-left: 5px solid #1a73e8; border-radius: 0 4px 4px 0; }
+  h3 { color: #2c3e50; margin-top: 1.7em; }
+  h4 { color: #444; margin-top: 1.3em; margin-bottom: 0.4em; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em;
+        overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+  code { background: #f0f0f0; padding: 0.08em 0.32em; border-radius: 3px;
+         font-family: "SF Mono", Consolas, monospace; font-size: 0.92em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+  th, td { border: 1px solid #d0d7de; padding: 0.55em 0.85em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  nav { background: #f0f7ff; padding: 0.8em 1.2em; border-radius: 6px; margin: 1em 0 2em 0; }
+  nav a { color: #1a73e8; margin-right: 1.1em; text-decoration: none; }
+  .callout { padding: 12px 16px; margin: 14px 0; border-radius: 4px; border-left: 4px solid; }
+  .note { background: #eef4ff; border-color: #1a73e8; }
+  .why  { background: #fff8e6; border-color: #f9a825; }
+  .good { background: #e6f4ea; border-color: #34a853; }
+  .bad  { background: #fce8e6; border-color: #ea4335; }
+  .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 14px 18px;
+             margin: 18px 0; border-radius: 4px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Vector Databases &amp; RAG Internals</h1>
+<p><em>The concepts every AI Engineer is expected to be able to walk through in interviews — how vector databases really work, how they differ, and what's happening underneath the cosine similarity call.</em></p>
+
+<nav>
+  <strong>Sections:</strong>
+  <a href="#what">1. What a vector DB actually is</a>
+  <a href="#three">2. The three you'll meet</a>
+  <a href="#dims">3. The four differentiating dimensions</a>
+  <a href="#hnsw">4. HNSW deep dive</a>
+  <a href="#ivf">5. IVF for contrast</a>
+  <a href="#quant">6. Quantization</a>
+  <a href="#hybrid">7. Hybrid search</a>
+  <a href="#chunks">8. Where the chunks live</a>
+  <a href="#pick">9. Picking a vector DB</a>
+  <a href="#interview">10. Interview answer</a>
+</nav>
+
+<!-- ================================================================= -->
+<h2 id="what">1. What a vector DB actually is</h2>
+
+<p>Most introductions describe a vector database as "a database for cosine similarity search." That's roughly 30% of the truth and the part that misleads engineers into thinking these are simple kNN engines. The real picture:</p>
+
+<pre><code>What you THINK is stored:
+{
+    "id": "doc_42",
+    "vector": [0.13, -0.87, ..., 0.04]
+}
+
+What's ACTUALLY stored:
+{
+    "id": "doc_42",
+    "vector": [0.13, -0.87, ..., 0.04],
+    "payload": {
+        "doc_type": "legal_brief",
+        "author": "smith_j",
+        "date": "2025-03-14",
+        "client_id": "acme_corp",
+        "text": "The court held that..."   // ← chunk text often inline
+    }
+}</code></pre>
+
+<p>Every record is a <strong>vector + structured payload</strong>. The store maintains two coordinated indexes:</p>
+
+<ol>
+  <li><strong>Vector index</strong> (HNSW or IVF) for approximate nearest-neighbor cosine / dot-product search</li>
+  <li><strong>Attribute index</strong> (B-tree, hash, inverted index) for filtering on payload fields</li>
+</ol>
+
+<p>A query like <em>"find me the 10 most similar legal briefs from 2025, authored by Smith, for client Acme"</em> hits both indexes and combines them. That hybrid is what makes vector DBs production-grade — they're <strong>specialized analytical stores</strong> optimized for "find similar AND attribute-matching," a job neither pure-relational nor pure-vector systems do well.</p>
+
+<div class="summary">
+The cleanest mental model: a vector DB is half search engine, half relational store, with the two halves wired together by a smart query planner. The cosine-similarity side is largely commoditized across vendors — what differentiates them is the rest of the system.
+</div>
+
+<!-- ================================================================= -->
+<h2 id="three">2. The three you'll meet in production</h2>
+
+<p><strong>Chroma · Qdrant · Pinecone.</strong> Each occupies a distinct position on the <em>managed ↔ self-operated</em> and <em>embedded ↔ distributed</em> axes.</p>
+
+<h3>ChromaDB</h3>
+<ul>
+  <li><strong>Open-source</strong> (Apache 2.0), Python + Rust</li>
+  <li><strong>Embedded by default</strong> — runs in your Python process, persists locally to SQLite + Parquet. "SQLite for vectors."</li>
+  <li>Has a server mode but most usage is embedded</li>
+  <li><strong>Strengths:</strong> zero ops, <code>pip install</code> and you have a working store in two lines</li>
+  <li><strong>Weaknesses:</strong> awkward scaling story past ~1M vectors; embedded mode caps at one process</li>
+</ul>
+
+<h3>Qdrant</h3>
+<ul>
+  <li><strong>Open-source</strong> (Apache 2.0), written in <strong>Rust</strong></li>
+  <li><strong>Server-first</strong> client-server architecture from day one</li>
+  <li>Self-hostable (Docker / Kubernetes) or Qdrant Cloud</li>
+  <li><strong>Strengths:</strong> rich filtering, native hybrid search, fast quantization (int8 + binary), mature Kubernetes operator, distributed sharding for horizontal scale</li>
+  <li><strong>Weaknesses:</strong> operational overhead in self-host mode</li>
+</ul>
+
+<h3>Pinecone</h3>
+<ul>
+  <li><strong>Closed-source.</strong> Fully managed cloud service. No self-host option.</li>
+  <li><strong>Serverless</strong> (default since 2024) — pay per request + storage, auto-scales</li>
+  <li><strong>Strengths:</strong> zero ops, sub-50ms p99 across regions, enterprise SLAs, the "boring choice" for production at scale</li>
+  <li><strong>Weaknesses:</strong> vendor lock-in, no offline/local-dev story, less feature-rich than Qdrant on filtering and hybrid search historically</li>
+</ul>
+
+<h3>Side-by-side</h3>
+
+<table>
+  <thead>
+    <tr><th>Dimension</th><th>ChromaDB</th><th>Qdrant</th><th>Pinecone</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>License</td><td>Apache 2.0</td><td>Apache 2.0</td><td>Proprietary SaaS</td></tr>
+    <tr><td>Self-host</td><td>Default (embedded)</td><td>Yes</td><td><strong>No</strong></td></tr>
+    <tr><td>Managed</td><td>Cloud (newer)</td><td>Cloud (mature)</td><td><strong>Only option</strong></td></tr>
+    <tr><td>Architecture</td><td>Embedded SQLite + HNSW</td><td>Client-server, sharded</td><td>Serverless (managed)</td></tr>
+    <tr><td>Typical p99 latency</td><td>5–20ms (local)</td><td>10–30ms (network)</td><td>30–80ms (cloud)</td></tr>
+    <tr><td>Single-instance ceiling</td><td>~1–10M vectors</td><td>~100M+ vectors</td><td>Effectively unlimited</td></tr>
+    <tr><td>Metadata filtering</td><td>Basic</td><td><strong>Strong</strong></td><td>Good</td></tr>
+    <tr><td>Hybrid (dense + sparse)</td><td>Basic</td><td><strong>Native, mature</strong></td><td>Added 2024</td></tr>
+    <tr><td>Quantization</td><td>Limited</td><td><strong>Int8 + binary</strong></td><td>Managed (opaque)</td></tr>
+    <tr><td>Vendor lock-in</td><td>None</td><td>Low</td><td><strong>High</strong></td></tr>
+    <tr><td>Local-dev story</td><td>Excellent</td><td>Good</td><td>Poor</td></tr>
+  </tbody>
+</table>
+
+<h3>The career-story positioning</h3>
+<p>Recruiters use these three as a rough proxy for experience level:</p>
+<ol>
+  <li><strong>Chroma</strong> — "I built my first RAG demo." Everyone has done this.</li>
+  <li><strong>Qdrant / Weaviate / pgvector</strong> — "I built a self-hosted vector store at scale." Signals you understand infra tradeoffs.</li>
+  <li><strong>Pinecone</strong> — "I shipped to production on managed infra." Signals you've made the buy-vs-build call and chosen to buy.</li>
+</ol>
+<p>Having all three on your portfolio closes that loop cleanly.</p>
+
+<!-- ================================================================= -->
+<h2 id="dims">3. The four dimensions that distinguish them</h2>
+
+<h3>3.1 Metadata filtering</h3>
+
+<p>The payload-filtering capability. The interesting design question is <strong>when</strong> the filtering happens relative to the vector search. Three strategies:</p>
+
+<ul>
+  <li><strong>Pre-filter:</strong> narrow candidates by metadata predicate first, then run vector search on what's left. Wins on highly-selective filters. Loses when filter eliminates 99% of vectors and HNSW can't navigate the remainder.</li>
+  <li><strong>Post-filter:</strong> vector search first, then drop non-matching candidates. Wins on low-selectivity filters. Loses when filter is selective — your top-K might all get dropped.</li>
+  <li><strong>Integrated / single-stage:</strong> walks the HNSW graph while checking the payload filter at each step. Best of both worlds, hardest to implement. <strong>Qdrant is state-of-the-art here.</strong></li>
+</ul>
+
+<p><strong>Why this matters in practice:</strong> MatchScout's Stage 1 does rule-based filtering in Python (location, budget, content_type) <em>before</em> Stage 2 cosine. A more sophisticated design would push that filter into the vector query as a payload predicate — one query instead of two stages. That's how production multi-tenant systems usually work.</p>
+
+<h3>3.2 Quantization</h3>
+
+<p>Compression of embedding vectors from <code>float32</code> down to fewer bits to reduce memory + speed up search. Treated in depth in <a href="#quant">section 6</a>.</p>
+
+<h3>3.3 Hybrid search (dense + sparse)</h3>
+
+<p>Running cosine on dense embeddings <em>and</em> BM25 on sparse keyword vectors in parallel, then combining the rankings via Reciprocal Rank Fusion. Treated in depth in <a href="#hybrid">section 7</a>.</p>
+
+<h3>3.4 p99 latency</h3>
+
+<p>The 99th-percentile response time — 99% of queries finish faster than this number, 1% take longer.</p>
+
+<p>You almost never quote the <strong>average</strong> in production engineering because it hides the tail. A system with 50ms p50 and 800ms p99 is a system where 1% of users have a terrible experience. Tail latency compounds in agentic systems: if your agent makes 5 vector calls per task, the probability of hitting at least one p99 call is <code>1 - (0.99)^5 ≈ 5%</code> — one in 20 tasks has a slow step.</p>
+
+<table>
+  <thead><tr><th>Component</th><th>Chroma (embedded)</th><th>Qdrant cloud</th><th>Pinecone</th></tr></thead>
+  <tbody>
+    <tr><td>Network round-trip</td><td>0ms</td><td>5–15ms</td><td>10–30ms</td></tr>
+    <tr><td>Query parsing</td><td>0.5ms</td><td>1–2ms</td><td>1–3ms</td></tr>
+    <tr><td>HNSW search</td><td>2–10ms</td><td>5–20ms</td><td>(opaque)</td></tr>
+    <tr><td>Metadata filter</td><td>1–5ms</td><td>2–10ms</td><td>included</td></tr>
+    <tr><td><strong>Typical p50</strong></td><td>5ms</td><td>15ms</td><td>30ms</td></tr>
+    <tr><td><strong>Typical p99</strong></td><td>20ms</td><td>50ms</td><td>100ms</td></tr>
+  </tbody>
+</table>
+
+<p>Vector DB latency rarely dominates the end-to-end agent — the LLM call that follows the retrieval is typically 10–100× more expensive. But tail latency matters for high-fan-out agents and real-time UX.</p>
+
+<!-- ================================================================= -->
+<h2 id="hnsw">4. HNSW deep dive — how vector search actually works</h2>
+
+<p><strong>Hierarchical Navigable Small Worlds</strong>. The dominant ANN algorithm. Used by Chroma, Qdrant, Weaviate, pgvector, Milvus, and (almost certainly) Pinecone serverless.</p>
+
+<h3>The problem it solves</h3>
+
+<p>You have N vectors, each D-dimensional. A query comes in. You want top-K nearest by cosine distance.</p>
+
+<p>Brute force: <code>O(N × D)</code> per query.</p>
+<ul>
+  <li>10K vectors × 1536 dims = 15M ops → ~5ms ✓</li>
+  <li>10M vectors × 1536 dims = 15B ops → ~5 seconds ✗</li>
+  <li>100M vectors × 1536 dims = 150B ops → minutes ✗</li>
+</ul>
+
+<p>HNSW trades a tiny amount of recall (1–5% miss rate) for a massive speedup. <strong>At 1M vectors, it's roughly 200× faster than brute force. At 100M, 10,000× faster.</strong></p>
+
+<h3>The storage representation — what's actually in memory</h3>
+
+<p>This is the part most explanations skip. An HNSW index is four data structures:</p>
+
+<pre><code># 1. Vector storage — embeddings stored once, by ID
+vectors = {
+    "V1":  [0.13, -0.87, ..., 0.04],   # 1536-dim float array
+    "V2":  [0.45,  0.21, ..., -0.11],
+    ...
+}
+
+# 2. Layer assignment — which layers each vector lives on
+max_layer = {
+    "V1": 0, "V2": 0, "V6": 2, "V9": 1, "V12": 3, ...
+}
+
+# 3. Adjacency lists per layer — explicit neighbor IDs for each node
+layer_0_neighbors = {
+    "V1":  ["V2", "V4"],          # M neighbors per node at layer 0
+    "V2":  ["V1", "V3", "V5", "V7"],
+    "V8":  ["V7", "V9", "V3", "V14"],  # neighbors chosen by vector-space proximity,
+    "V15": ["V14", "V16", "V11", "V22"],  # NOT by ID adjacency
+    ...
+}
+
+layer_1_neighbors = { "V3": ["V6", "V9"], "V6": ["V3", "V9", "V12"], ... }
+layer_2_neighbors = { "V6": ["V12"], "V12": ["V6", "V19"], ... }
+layer_3_neighbors = { "V12": ["V19"], "V19": ["V12"] }
+
+# 4. Single entry point
+entry_point = "V12"
+</code></pre>
+
+<p><strong>Important storage insight:</strong> the neighbors are <em>not</em> determined by ID adjacency. <code>V15</code>'s neighbors at layer 0 could be <code>[V8, V14, V21, V29]</code> or anything else — they're whichever vectors the build process found closest to V15 in actual vector space. Visualizations that show vectors lined up in a row by ID are pedagogical conveniences; the real storage is adjacency lists.</p>
+
+<h3>The mental model — multiple resolutions of the same space</h3>
+
+<p>Each layer is a graph over the <em>same</em> vector pool but with <em>different connectivity densities</em>:</p>
+
+<pre><code>Layer 3 (top):    ●───────────────────●     (2 nodes, long sparse edges)
+                  │                   │
+Layer 2:          ●────●─────────●────●     (4 nodes, medium edges)
+                  │    │         │    │
+Layer 1:          ●──●─●──●──●───●──●─●     (8 nodes, more edges)
+                  │  │ │  │  │   │  │ │
+Layer 0:          ●●●●●●●●●●●●●●●●●●●●●     (ALL N nodes, dense edges)
+</code></pre>
+
+<p>The upper layers are NOT semantic categories or partitions. <strong>They're sparser graphs over the same space.</strong> A vector might exist on layers 0, 1, 2 (got lucky in random assignment) or only layer 0. There are no hard boundaries between regions — every layer covers the entire vector space.</p>
+
+<div class="bad">
+<strong>Common misconception:</strong> "Layer 2 represents broad categories, layer 0 has the specific items." Wrong — that's a tree-based index (KD-tree, IVF). HNSW has no partitioning. The layers differ only in connectivity density; the navigation is graph traversal, not category narrowing.
+</div>
+
+<h3>The query algorithm</h3>
+
+<p>Three phases:</p>
+
+<ol>
+  <li><strong>Upper layers (greedy descent):</strong> from the entry point, repeatedly evaluate the current node's neighbors at this layer and jump to whichever is closest to query. Stop when no neighbor improves. Drop one layer, <em>staying at the same vector</em>.</li>
+  <li><strong>Layer 0 (priority queue, size <code>ef_search</code>):</strong> maintain a candidate pool. Pop the best unvisited candidate, evaluate its neighbors, update the pool. Continue until convergence.</li>
+  <li><strong>Return top-K</strong> from the layer-0 result set.</li>
+</ol>
+
+<h3>Worked example — three queries</h3>
+
+<p>With the 29-vector layout above (V12 and V19 at top layer; V8, V17, V25 as query targets):</p>
+
+<table>
+  <thead><tr><th>Query target</th><th>Walk</th><th>Total evaluations</th></tr></thead>
+  <tbody>
+    <tr><td>V8 (left)</td><td>V12 → V12 → V6 → V9 → V8</td><td>~10</td></tr>
+    <tr><td>V17 (middle)</td><td>V12 → V19 → V19 → V16 → V17</td><td>~7</td></tr>
+    <tr><td>V25 (right)</td><td>V12 → V19 → V27 → V27 → V26 → V25</td><td>~7</td></tr>
+  </tbody>
+</table>
+
+<p>Same entry point (V12). Same graph. Same algorithm. The walks diverge immediately because at each step, "which neighbor is closest to Q?" gives a different answer depending on where Q is. <strong>No precomputed routing</strong> — greedy descent is what makes each query go in the right direction.</p>
+
+<h3>The tunable parameters</h3>
+
+<table>
+  <thead><tr><th>Parameter</th><th>Typical default</th><th>What it controls</th></tr></thead>
+  <tbody>
+    <tr><td><code>M</code></td><td>16</td><td>Neighbors per node at layers ≥ 1</td></tr>
+    <tr><td><code>M_0</code></td><td>32 (= 2M)</td><td>Neighbors per node at layer 0 (denser)</td></tr>
+    <tr><td><code>ef_construction</code></td><td>100–200</td><td>Candidate pool during build (build quality)</td></tr>
+    <tr><td><code>ef_search</code></td><td>50–200</td><td>Candidate pool during query (recall vs latency)</td></tr>
+  </tbody>
+</table>
+
+<p><code>ef_search</code> is the only knob set per query. Higher = better recall, more layer-0 work.</p>
+
+<table>
+  <thead><tr><th><code>ef_search</code></th><th>Layer-0 distance computations</th><th>Recall@10</th></tr></thead>
+  <tbody>
+    <tr><td>16</td><td>~500</td><td>85–90%</td></tr>
+    <tr><td>50</td><td>~1,500</td><td>92–96%</td></tr>
+    <tr><td>100</td><td>~3,000</td><td>95–98%</td></tr>
+    <tr><td>200</td><td>~6,000</td><td>97–99%</td></tr>
+    <tr><td>500</td><td>~15,000</td><td>98–99.5%</td></tr>
+  </tbody>
+</table>
+
+<h3>The speedup curve</h3>
+
+<table>
+  <thead><tr><th>N</th><th>Brute force ops</th><th>HNSW ops (defaults)</th><th>Speedup</th></tr></thead>
+  <tbody>
+    <tr><td>10K</td><td>10,000</td><td>~2,000</td><td>5×</td></tr>
+    <tr><td>100K</td><td>100,000</td><td>~3,500</td><td>30×</td></tr>
+    <tr><td>1M</td><td>1,000,000</td><td>~5,000</td><td><strong>200×</strong></td></tr>
+    <tr><td>10M</td><td>10,000,000</td><td>~7,000</td><td>1,400×</td></tr>
+    <tr><td>100M</td><td>100,000,000</td><td>~10,000</td><td>10,000×</td></tr>
+  </tbody>
+</table>
+
+<p>Brute force scales linearly. HNSW scales roughly with <code>log N</code>. The speedup grows as <code>N / log N</code> — which is why HNSW becomes more and more dominant at scale.</p>
+
+<h3>The two prices you pay</h3>
+<ol>
+  <li><strong>1–5% recall miss</strong> — greedy walk occasionally misses the true nearest neighbor. Mitigated by raising <code>ef_search</code>.</li>
+  <li><strong>Memory overhead</strong> — adjacency lists at each layer add 4–10% on top of raw vector storage.</li>
+</ol>
+
+<!-- ================================================================= -->
+<h2 id="ivf">5. IVF — the other algorithm, for contrast</h2>
+
+<p><strong>Inverted File Index.</strong> The classic alternative to HNSW. Used by FAISS at billion-vector scale and as an option in Milvus.</p>
+
+<h3>The intuition</h3>
+
+<p>Cluster all vectors into K centroids (via k-means). Each vector belongs to its closest centroid. At query time, find the <code>nprobe</code> closest centroids to the query and brute-force-search only those buckets.</p>
+
+<pre><code>Step 1: Query vector q comes in.
+Step 2: Compare q against ALL K centroids (K typically 1000-10000).
+Step 3: Pick the nprobe closest centroids (typical nprobe = 8-32).
+Step 4: Brute-force search vectors in those buckets only.
+Step 5: Return top K by cosine.</code></pre>
+
+<p><strong>This is what people often <em>mistakenly</em> think HNSW does.</strong> IVF really does partition space into regions and search within them. HNSW does not — that's the key distinction.</p>
+
+<h3>HNSW vs IVF</h3>
+
+<table>
+  <thead><tr><th>Property</th><th>HNSW</th><th>IVF</th></tr></thead>
+  <tbody>
+    <tr><td>Underlying structure</td><td>Multi-layer graph</td><td>K-means partitioned buckets</td></tr>
+    <tr><td>Layers represent</td><td>Different connectivity densities</td><td>Partitions of space</td></tr>
+    <tr><td>Boundaries between regions</td><td>None</td><td>Hard</td></tr>
+    <tr><td>Query complexity</td><td>O(log N)</td><td>O(K + N/nlist × nprobe)</td></tr>
+    <tr><td>Memory overhead</td><td>High (graph edges)</td><td>Low (just centroids)</td></tr>
+    <tr><td>Recall at defaults</td><td>95–99%</td><td>90–95%</td></tr>
+    <tr><td>Query speed at high recall</td><td><strong>Faster</strong></td><td>Slower above 95%</td></tr>
+    <tr><td>Build time (10M vectors)</td><td>Hours</td><td>Minutes</td></tr>
+    <tr><td>Dynamic inserts</td><td><strong>Native</strong></td><td>Awkward (centroids drift)</td></tr>
+    <tr><td>Distributable across shards</td><td>Awkward</td><td><strong>Natural</strong></td></tr>
+    <tr><td>Pairs with quantization</td><td>Yes</td><td><strong>Especially well (IVF+PQ)</strong></td></tr>
+  </tbody>
+</table>
+
+<p><strong>When IVF wins:</strong> billion-vector scale where memory matters more than recall ceiling, distributed systems where sharding-by-bucket is natural, and FAISS-style workloads with mostly-static data. Otherwise HNSW dominates.</p>
+
+<!-- ================================================================= -->
+<h2 id="quant">6. Quantization — vector and LLM</h2>
+
+<p>Compression of float32 values to fewer bits. <strong>Same technique, two different targets.</strong></p>
+
+<h3>The core idea</h3>
+
+<p>Embedding vectors are typically <code>float32</code> — 4 bytes per dimension. A 1536-dim vector is 6,144 bytes. At 10M vectors, that's 61 GB. RAM becomes the bottleneck before anything else.</p>
+
+<table>
+  <thead><tr><th>Format</th><th>Bytes per dim</th><th>1536-dim vector size</th><th>Recall loss vs float32</th></tr></thead>
+  <tbody>
+    <tr><td>float32 (baseline)</td><td>4</td><td>6,144 B</td><td>0%</td></tr>
+    <tr><td>float16</td><td>2</td><td>3,072 B</td><td>&lt;1%</td></tr>
+    <tr><td>int8</td><td>1</td><td>1,536 B</td><td>&lt;1% (with re-ranking)</td></tr>
+    <tr><td>binary (1-bit)</td><td>0.125</td><td>192 B</td><td>3–15% (with re-ranking)</td></tr>
+  </tbody>
+</table>
+
+<h3>Why quantization speeds up search (three effects, all real)</h3>
+
+<p><strong>(1) Memory bandwidth is the dominant bottleneck.</strong> Modern CPUs do arithmetic far faster than they pull data from RAM. Cutting vector size 4× cuts the bytes you have to fetch 4× → roughly 4× faster end-to-end.</p>
+
+<p><strong>(2) Integer SIMD is faster than float SIMD.</strong> AVX-512 processes 16 float32 per instruction OR 64 int8 per instruction — 4× more parallelism.</p>
+
+<p><strong>(3) Binary changes the math entirely.</strong> For 1-bit vectors, cosine similarity becomes Hamming distance:</p>
+
+<pre><code># Float cosine — expensive
+similarity = sum(a[i] * b[i] for i in range(D)) / (|a| * |b|)
+# 1500 multiply-adds for a 1536-dim vector
+
+# Binary "similarity" — Hamming distance via XOR + popcount
+distance = popcount(a XOR b)
+# 24 XOR + popcount instructions for the same 1536 dims
+# 10-40× faster in practice</code></pre>
+
+<h3>Re-ranking — the trick that preserves accuracy</h3>
+
+<p>Production systems do two-stage search:</p>
+<ol>
+  <li><strong>Stage 1:</strong> scan ALL quantized vectors super fast, pull top 100 candidates</li>
+  <li><strong>Stage 2:</strong> re-rank those 100 with full-precision <code>float32</code> vectors</li>
+</ol>
+<p>You get binary-quantization speed for the bulk filter and float32 accuracy for the final ranking. Recall loss drops to under 1% even with binary.</p>
+
+<h3>The same idea for LLMs</h3>
+
+<p>When you ran Gemma 4 26B Q4_K_M on the home GPU box, you were doing <strong>the exact same math</strong> applied to a different object:</p>
+
+<table>
+  <thead><tr><th></th><th>LLM weight quantization</th><th>Vector DB quantization</th></tr></thead>
+  <tbody>
+    <tr><td>What gets compressed</td><td>Model weights</td><td>Embedding vectors</td></tr>
+    <tr><td>Original format</td><td>float32 / float16</td><td>float32</td></tr>
+    <tr><td>Common targets</td><td>int8, int4, NF4, Q4_K_M</td><td>int8, binary, PQ</td></tr>
+    <tr><td>The math</td><td>scale + zero-point mapping</td><td>scale + zero-point mapping</td></tr>
+    <tr><td>Why it speeds up</td><td>Memory bandwidth + SIMD</td><td>Memory bandwidth + SIMD</td></tr>
+    <tr><td>Quality tradeoff</td><td>Perplexity goes up</td><td>Recall@K goes down</td></tr>
+    <tr><td>Re-ranking equivalent</td><td>Mixed precision (some layers higher bit)</td><td>Quantized scan + float re-rank</td></tr>
+  </tbody>
+</table>
+
+<p>Q4_K_M means most weights at 4 bits, some critical layers at higher precision — directly analogous to vector DB binary scan + float re-rank.</p>
+
+<div class="why">
+<strong>The unification worth carrying into interviews:</strong> "Quantization in modern AI infrastructure is one technique — map floats to fewer-bit integers via scale + zero-point — applied wherever memory bandwidth dominates over arithmetic precision. LLM inference uses it for weights. Vector databases use it for embeddings. Both pay a small accuracy tax for a large speed and memory gain. The fact that both communities converged on 8× compression with &lt;1% loss at int8 isn't coincidence — it's because the underlying bottleneck is the same."
+</div>
+
+<!-- ================================================================= -->
+<h2 id="hybrid">7. Hybrid search — dense + sparse</h2>
+
+<p>Pure cosine on dense embeddings is great at <strong>semantic</strong> matching but bad at <strong>exact-token retrieval</strong> — error codes, function names, drug names, citation strings. The embedding model has likely never seen the rare token, so cosine distance is no better than random for documents containing it.</p>
+
+<p><strong>Sparse retrieval</strong> (BM25, TF-IDF) is the opposite — nails exact-token matching, misses paraphrase. Hybrid search runs both and combines.</p>
+
+<h3>BM25 in one sentence</h3>
+
+<p>BM25 tokenizes the query and each document, scores documents by how much the query's tokens appear in them, weighted by rarity (rare tokens like <code>EADDRINUSE</code> get higher weight than common ones like "the"). It's a bag-of-words model. <strong>It does not understand paraphrase</strong> — <code>port already in use</code> and <code>EADDRINUSE</code> share zero tokens, so BM25 sees zero overlap.</p>
+
+<h3>The four-cell coverage map</h3>
+
+<table>
+  <thead>
+    <tr><th></th><th>Query has rare token</th><th>Query is paraphrased</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Doc has rare token</strong></td><td>BM25 wins</td><td>Dense wins (semantic bridge)</td></tr>
+    <tr><td><strong>Doc has paraphrase</strong></td><td>Dense wins (if model knows it)</td><td>BM25 wins (literal match)</td></tr>
+    <tr><td><strong>Doc has neither</strong></td><td colspan="2">Nothing finds it</td></tr>
+  </tbody>
+</table>
+
+<p>In three of four cells, hybrid genuinely adds value over either alone. Hybrid search is <strong>not</strong> "BM25 catches exact, dense catches semantic" — both methods match on tokens, just different kinds. Hybrid wins because dense and sparse succeed in different parts of the query × document space, and combining them covers more ground than either alone.</p>
+
+<h3>Reciprocal Rank Fusion (RRF) — the combination algorithm</h3>
+
+<pre><code>dense_results  = vector_search(query)   # top 20 with ranks
+sparse_results = bm25_search(query)     # top 20 with ranks
+
+# RRF score for each doc:
+score(doc) = sum over each retriever of 1 / (k + rank_in_that_retriever)
+# k is typically 60
+
+# Docs that rank highly in BOTH win.</code></pre>
+
+<p>Production reality: hybrid search beats pure-dense on most retrieval benchmarks by 5–15% recall@10, especially on technical content (code, error logs, scientific papers, legal docs). It's the default in modern production RAG.</p>
+
+<!-- ================================================================= -->
+<h2 id="chunks">8. Where the actual chunk text lives</h2>
+
+<p>Crucial question that "how does RAG work" diagrams gloss over. The LLM doesn't see vectors. It sees <strong>text chunks</strong>. Where are those chunks?</p>
+
+<h3>Architecture A — chunks stored INSIDE the vector DB (the default)</h3>
+
+<pre><code>{
+    "id": "doc_42_chunk_7",
+    "vector": [0.13, -0.87, ..., 0.04],
+    "payload": {
+        "text": "The court held that the doctrine of fair use applies when...",
+        "doc_id": "doc_42",
+        "page_number": 17,
+        "source_url": "https://..."
+    }
+}</code></pre>
+
+<p>One round trip, simple architecture. This is what P2 DocTalk does — when you call <code>collection.query(...)</code>, returned chunks come from the payload.</p>
+
+<h3>Architecture B — chunks stored EXTERNALLY, only an ID in the vector DB</h3>
+
+<pre><code># In the vector DB:
+{
+    "id": "doc_42_chunk_7",
+    "vector": [0.13, -0.87, ..., 0.04],
+    "payload": {
+        "external_ref": "s3://my-bucket/docs/doc_42/chunk_7.txt",
+        "doc_id": "doc_42",
+        "page_number": 17
+    }
+}
+
+# Query path:
+top_ids = vector_db.query(query_vector, top_k=10)
+chunks  = [s3.get(r.payload["external_ref"]) for r in top_ids]</code></pre>
+
+<p>Two round trips but the vector store stays lean. Used at large scale where storing inline is too expensive. Pinecone charges by storage volume in serverless, so this pattern is common there.</p>
+
+<div class="note">
+<strong>Most production systems pick inline.</strong> The 5–10× storage cost is dwarfed by simplicity gains at &lt;100M chunks. External storage shows up at extreme scale or when chunk text has a different lifecycle (e.g., updated independently of embeddings).
+</div>
+
+<!-- ================================================================= -->
+<h2 id="pick">9. Picking a vector DB — decision framework</h2>
+
+<h3>Pick ChromaDB when…</h3>
+<ul>
+  <li>Prototyping, tutorials, personal RAG projects</li>
+  <li>Under 1M vectors, single-process access</li>
+  <li>You don't want to operate anything</li>
+  <li>You're early enough that the vector store doesn't have to be the production choice</li>
+  <li><strong>Local semantic caches</strong> — exactly this profile: small, embedded, low-ops</li>
+</ul>
+
+<h3>Pick Qdrant when…</h3>
+<ul>
+  <li>Going to production with ops capability and want self-host flexibility</li>
+  <li>Need <strong>rich filtering</strong> — payload-predicate queries that are first-class</li>
+  <li>Need <strong>hybrid search</strong> without bolting on a second system</li>
+  <li>Scale-conscious — quantization (int8, binary) cuts memory 4–32×</li>
+  <li>Concerned about vendor lock-in or per-request pricing</li>
+  <li><strong>Want a production-grade store you can also run on a laptop</strong> — Qdrant uniquely wins here</li>
+</ul>
+
+<h3>Pick Pinecone when…</h3>
+<ul>
+  <li>Need managed vector DB and "we'll just operate it" isn't acceptable</li>
+  <li>Need enterprise SLAs, audit logs, contracts — Pinecone has a sales team; the others have GitHub issues</li>
+  <li>Bursty traffic where serverless economics work in your favor</li>
+  <li>You explicitly want vendor lock-in because the managed simplicity is worth it (legitimate choice)</li>
+  <li>Recruiter signal — shows up in JDs more than the other two combined</li>
+</ul>
+
+<!-- ================================================================= -->
+<h2 id="interview">10. The 90-second interview answer</h2>
+
+<div class="summary">
+"A vector database is half search engine, half relational store. It maintains a vector index for approximate nearest-neighbor search and an attribute index for filtering on structured payload, with a query planner combining them. The cosine-similarity side is largely commoditized — the real differentiation is in metadata filtering, quantization, and hybrid search.
+<br><br>
+The dominant indexing algorithm is HNSW, which builds a multi-layer graph where each layer is the same vector pool with a different connectivity density — sparser edges higher up for long-range jumps, denser at layer 0 for fine-grained search. A query does greedy descent through the upper layers and then a priority-queue search at layer 0. The whole thing reduces query work from O(N) brute force to roughly O(log N + ef_search × M), which is a ~200× speedup at 1M vectors and 10,000× at 100M, in exchange for 1–5% recall loss and ~5% memory overhead.
+<br><br>
+The alternative algorithm, IVF, partitions space into k-means buckets and probes a few — that's the one people often <em>think</em> HNSW does. IVF wins at extreme scale and natural sharding; HNSW wins everywhere else.
+<br><br>
+Quantization compresses vectors from float32 down to int8 or binary, cutting memory 4–32× and speeding queries 2–40× via memory bandwidth gains and SIMD parallelism. Combined with a re-ranking pass on the top-K candidates, recall loss stays under 1% even with binary. The exact same math is what compresses LLM weights to Q4_K_M for local inference — it's one technique applied to different objects.
+<br><br>
+Hybrid search combines dense embedding retrieval with sparse BM25 keyword retrieval via Reciprocal Rank Fusion. It wins on technical content where exact-token matches matter — error codes, drug names, code identifiers — which dense embeddings handle poorly.
+<br><br>
+Chroma, Qdrant, Pinecone — the three production choices. Chroma is SQLite for vectors, embedded and zero-ops, prototyping default. Qdrant is open-source Rust, server-first, strongest on filtering and quantization, self-host or managed. Pinecone is closed-source SaaS, zero-ops, vendor lock-in, the enterprise default. Pick depends on whether you want to operate it, pay someone else to operate it, or it's small enough not to need operating."
+</div>
+
+</body>
+</html>

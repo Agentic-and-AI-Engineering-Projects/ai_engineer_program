@@ -205,18 +205,36 @@ Weekly plan tickets in Kanban track the week's goals.
 - [x] P7 MatchScout — **substantively COMPLETE** for job-application purposes (Phases 0–5 done, LangSmith @traceable shipped, Phases 5.4/5.5 + 6–8 deferred indefinitely)
 - [x] HPRC Framework — built offline 2026-05-31 to 2026-06-03 at ~/ai/Prep, Apache-2.0 open source (NOT a curriculum project — added as a portfolio centerpiece)
 
-### Build phase — DEFERRED post-job-search
-- P8 PII Compliance · P9 standalone 4-framework memory benchmark (rolled into P13) · P10 AgentPlatform · P11 Multimodal · P12 5-framework showdown · P13 MatchScout V2 Agent SDK · P14 MatchScout V3 Managed Agents
+### Build phase — DEFERRED post-job-search (mostly)
+- P8 PII Compliance · P9 standalone 4-framework memory benchmark (rolled into P13) · P10 AgentPlatform · P11 Multimodal · P12 5-framework showdown · P14 MatchScout V3 Managed Agents
+
+### Build phase — MOVED UP 2026-06-25, expanded 2026-06-26
+- **P13 MatchScout V2 — Agent SDK rebuild on AWS Bedrock** — pulled out of deferred. Slots after the P2 Pinecone variant. Driver: Claude Agent SDK + subagents + Anthropic Memory tool + Reflexion + **AWS Bedrock** show up across active JDs and want portfolio coverage now. Carries `advanced_patterns/03_reflexion/` along since the critic subagent IS Reflexion.
+- **Bedrock fold-in (2026-06-26):** P13 will use Bedrock-hosted Claude Sonnet 4.6 via `boto3` + Claude Agent SDK rather than direct Anthropic API. Real enterprise scenario (IAM, billing, compliance, VPC). Captures: IAM role + Bedrock model access, cross-region inference profiles, Bedrock Guardrails, CloudWatch Logs traces, Bedrock vs direct-API cost comparison.
+- **Optional Bedrock primer (pending user decision):** standalone ~100-line `bedrock_primer.py` slotted between Pinecone and P13 for AWS console familiarity. User to confirm yes/no on next session.
 
 ### Active phase — REVISION ARC + JOB SEARCH (since 2026-05-27)
-**P1–P7 deep-walk revision for interview prep** is currently in flight, interleaved with the job-application pipeline.
+**P1–P7 deep-walk revision for interview prep** is in flight, interleaved with job-application pipeline.
 - [x] P1 ToolBot revision — COMPLETE (6 concepts)
 - [x] P2 DocTalk revision — COMPLETE (5 concepts)
-- [ ] **P3 ResearchBot revision — IN PROGRESS** (Concepts 1-7 ✅ as of 2026-06-23; Concept 8 = Kafka pattern remaining)
+- [x] **P3 ResearchBot revision — COMPLETE 2026-06-25** (all 8 concepts; Concept 8 Kafka quiz 5/8 with gap-fills patched into Appendix J of master guide)
 - [ ] P4 StockSage revision — queued
 - [ ] P5 ReviewCrew revision — queued
 - [ ] P6 MCP++ revision — queued
 - [ ] P7 MatchScout revision — queued
+
+**Active queue order (re-locked 2026-06-26 — Bedrock primer slotted in):**
+1. P2 Pinecone variant (`p2_doctalk/doctalk_pinecone.py`) — IN FLIGHT, awaiting user run
+2. **P2.5 AWS Bedrock primer** (`p2_5_bedrock_primer/bedrock_primer.py`) — CREATED 2026-06-26, awaiting user AWS setup + run
+3. P5 ReviewCrew revision
+4. P6 MCP++ revision
+5. **P13 MatchScout V2 Agent SDK rebuild on Bedrock** (carries `advanced_patterns/03_reflexion/`; Bedrock-hosted Claude via boto3 + Agent SDK)
+6. Database Foundations + Phase-A quizzes (PostgreSQL + MongoDB)
+7. Task 2 — System design 15 prioritized patterns
+8. Remaining advanced patterns (`advanced_patterns/04`–`27` placeholders ready)
+9. P7 MatchScout revision (saved as closer — most-fluent project, warm-up before interviews)
+
+**SKIPPED:** P4 StockSage revision (user call 2026-06-25 — already comfortable with multi-tool orchestration concepts).
 
 **Per-concept workflow (updated 2026-06-22):** code re-read → **Phase A: 6-10 objective-type questions** (MCQ/T-F/fill-in-blank/match — NOT free text) → grade + gap-fill → Phase B (2–3 sharpest interview-grade points) → patch INTERVIEW_STUDY_GUIDE.html and cheatsheets. See `feedback_phase_a_objective_format.md`.
 
@@ -226,7 +244,7 @@ Weekly plan tickets in Kanban track the week's goals.
 - [ ] Task 2 — System design prioritized ~15 patterns — queued (after P4)
 - [ ] **Database Foundations (PostgreSQL + MongoDB short courses)** — added to plan.txt 2026-06-23, not yet started; suggested slot between P4 and Task 2.
 
-### Active job applications (as of 2026-06-23 — 6 in flight)
+### Active job applications (as of 2026-06-26 — 8 in flight)
 | Company | Role | Track | Applied |
 |---|---|---|---|
 | Apple | Agentic AI Product Manager (Austin) | AI PM | 2026-06-11 |
@@ -235,8 +253,18 @@ Weekly plan tickets in Kanban track the week's goals.
 | Heartflow | Senior Agentic AI Engineer | AI Engineer | 2026-06-17 |
 | NVIDIA | Senior TPM, Server Engineering Operations | DC Infra PM | 2026-06-18 |
 | **Apple ASE PMO** | Program Manager, PMO (Apple Services Engineering) | PM + AI fluency | **2026-06-22 — strongest fit** |
+| Cerebras Systems | Sr TPM, AI Infrastructure / Site Operations | DC Infra PM | 2026-06-24 (resume built; user confirmed apply) |
+| **Oracle** | **Sr Principal TPM (IC5, Cloud Transformation + AI/Automation)** | **DC Infra / Cloud Transformation** | **2026-06-26 ✅ applied** |
 
-**Skipped in this batch:** NVIDIA Agentic Engineering (compiler/GPU specialized) · Equinix Senior Staff (deferred).
+**Skipped in this batch (2026-06-26):** Particle41 AI Engineer — explicit user call, JD wanted broad ML (TensorFlow/PyTorch/fine-tuning/TTS/STT/computer vision/time-series/MLflow), Rajesh's stack is agentic-orchestration depth not ML breadth, ~40% real coverage. Resume built (`RESUME_PARTICLE41_AI_ENGINEER.{md,docx,pdf}`) but not submitted. Files on disk for reference.
+
+**Earlier skipped:** NVIDIA Agentic Engineering (compiler/GPU specialized) · Equinix Senior Staff (deferred).
+
+### Agentic AI deep-dive — depth-not-breadth strategy (set 2026-06-26)
+The "limitless info" trap. The 2026 market is converging around a smaller must-know set. Pick 3-5 areas of credible depth; let the rest be defensible breadth.
+- **Tier 1 — build into real code (interview-leverage maximum):** Claude Agent SDK · AWS Bedrock · Reflexion / self-critique · Subagent decomposition with fact-checker · Cost / latency observability at scale. All landing in P13.
+- **Tier 2 — read deeply enough for strong opinion:** OpenAI Agents SDK · AutoGen v0.4+ · LangGraph Send API + advanced patterns · LLM-as-judge biases + multi-family judge ensembles · Constitutional AI.
+- **Tier 3 — defensibly aware, don't drill:** Fine-tuning (defensible as "prompt engineering + structured output gets us 95%") · Computer vision agents · Voice agents (LiveKit/Deepgram) · RLHF · Niche frameworks (Pydantic-AI, Phidata, Letta).
 
 **Standing rule when a recruiter responds:** drop revision/curriculum work, load the corresponding interview-prep memory file, start mocking.
 

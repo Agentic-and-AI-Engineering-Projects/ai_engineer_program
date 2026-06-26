@@ -36,3 +36,19 @@ chroma_data/
 
 # Master guide is derived from sources via /tmp/build_master_guide.py
 AGENTIC_AI_MASTER_GUIDE.html
+
+# Cloned third-party companion code repo (separate upstream)
+advanced_patterns/agentic-ai-bible/
+
+# Personal — job application artifacts stay local
+RESUME_*.md
+RESUME_*.docx
+RESUME_*.pdf
+COVER_LETTER_*.md
+COVER_LETTER_*.docx
+COVER_LETTER_*.pdf
+
+# Office lock/temp files
+~$*.docx
+~$*.doc
+~$*.pptx
