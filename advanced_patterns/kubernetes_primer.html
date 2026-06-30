@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <title>Kubernetes Primer for AI Engineers</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { useMaxWidth: true } });</script>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
          max-width: 1100px; margin: 2em auto; padding: 0 2em 4em 2em;
@@ -29,6 +31,8 @@
   .bad  { background: #fce8e6; border-color: #ea4335; }
   .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 14px 18px;
              margin: 18px 0; border-radius: 4px; font-style: italic; }
+  .mermaid { background: #fafbfc; padding: 1em; border-radius: 6px; text-align: center;
+             margin: 1.2em 0; border: 1px solid #e0e6ee; }
 </style>
 </head>
 <body>
@@ -113,25 +117,44 @@ The cleanest one-liner: Kubernetes turns "I have 50 machines and 200 containers"
 
 <h3>The mental model</h3>
 
-<pre><code>┌─────────────────────────── Control Plane ───────────────────────────┐
-│                                                                       │
-│   kubectl ──&gt; kube-apiserver  ──&gt; etcd (cluster state DB)            │
-│                     │                                                  │
-│                     ├──&gt; kube-scheduler   (assigns pods to nodes)    │
-│                     └──&gt; controller-manager (reconciles desired vs actual) │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
-                              │
-            ┌─────────────────┼─────────────────┐
-            │                 │                 │
-       ┌────▼────┐       ┌────▼────┐       ┌────▼────┐
-       │ Node 1  │       │ Node 2  │       │ Node 3  │
-       │ kubelet │       │ kubelet │       │ kubelet │
-       │ kube-proxy│     │ kube-proxy│     │ kube-proxy│
-       │ containerd│     │ containerd│     │ containerd│
-       │  [pod][pod]│    │  [pod]   │     │  [pod][pod]│
-       └─────────┘       └─────────┘       └─────────┘
-</code></pre>
+<div class="mermaid">
+flowchart TB
+  subgraph CP ["Control Plane (the brain)"]
+    direction LR
+    KCL["kubectl / CI / dashboard"] --&gt; API["kube-apiserver<br/>(single entry point)"]
+    API --&gt; ETCD[("etcd<br/>cluster state DB")]
+    API --&gt; SCH["kube-scheduler<br/>(assigns pods to nodes)"]
+    API --&gt; CM["controller-manager<br/>(reconciles desired vs actual)"]
+    API --&gt; CCM["cloud-controller-manager<br/>(provisions LBs, volumes)"]
+  end
+
+  subgraph N1 ["Node 1 (worker)"]
+    KL1["kubelet"]
+    KP1["kube-proxy"]
+    CR1["containerd"]
+    POD1A["pod"]
+    POD1B["pod"]
+  end
+
+  subgraph N2 ["Node 2 (worker)"]
+    KL2["kubelet"]
+    KP2["kube-proxy"]
+    CR2["containerd"]
+    POD2A["pod"]
+  end
+
+  subgraph N3 ["Node 3 (worker)"]
+    KL3["kubelet"]
+    KP3["kube-proxy"]
+    CR3["containerd"]
+    POD3A["pod"]
+    POD3B["pod"]
+  end
+
+  API -. "watch / assign" .-&gt; KL1
+  API -. "watch / assign" .-&gt; KL2
+  API -. "watch / assign" .-&gt; KL3
+</div>
 
 <!-- ============================================================== -->
 <h2 id="pod">3. Pods — the atomic unit</h2>
@@ -174,6 +197,21 @@ spec:
 
 <p>The pod abstraction lets you group <strong>tightly-coupled containers that must share a network</strong>. The canonical example is the <strong>sidecar pattern</strong> — your app container plus a logging-shipper container that tails a shared volume. Both must be on the same machine; both must die together; both must talk on localhost. The pod expresses that.</p>
 
+<div class="mermaid">
+flowchart LR
+  subgraph POD ["Pod (single IP, shared volumes)"]
+    APP["app container<br/>(FastAPI server :8000)"]
+    SIDECAR["sidecar container<br/>(Fluent Bit log shipper)"]
+    VOL[("shared volume<br/>/var/log/app")]
+    APP --&gt; VOL
+    SIDECAR --&gt; VOL
+    APP -.-&gt; |"localhost:9090"| SIDECAR
+  end
+
+  EXT["external traffic"] --&gt; APP
+  SIDECAR --&gt; ES["Elasticsearch<br/>(outside cluster)"]
+</div>
+
 <!-- ============================================================== -->
 <h2 id="workloads">4. Workload controllers</h2>
 
@@ -208,9 +246,44 @@ spec:
         - containerPort: 8000
 </code></pre>
 
+<div class="mermaid">
+flowchart TB
+  D["Deployment<br/>matchscout-api<br/>replicas: 3, image: v1.2.3"]
+  D --&gt; RS["ReplicaSet<br/>matchscout-api-7b8d9<br/>(owned by Deployment)"]
+  RS --&gt; P1["Pod<br/>matchscout-api-7b8d9-x4q2v"]
+  RS --&gt; P2["Pod<br/>matchscout-api-7b8d9-m3k1n"]
+  RS --&gt; P3["Pod<br/>matchscout-api-7b8d9-q9b2t"]
+</div>
+
+<p>Rolling update — what actually happens when you bump the image:</p>
+
+<div class="mermaid">
+flowchart LR
+  subgraph T0 ["t=0  (before update)"]
+    D0["Deployment"] --&gt; RSO0["ReplicaSet v1<br/>(3 pods)"]
+  end
+
+  subgraph T1 ["t=1  (kubectl apply with v2 image)"]
+    D1["Deployment"] --&gt; RSO1["ReplicaSet v1<br/>(2 pods)"]
+    D1 --&gt; RSN1["ReplicaSet v2<br/>(1 pod, ready)"]
+  end
+
+  subgraph T2 ["t=2  (mid-rollout)"]
+    D2["Deployment"] --&gt; RSO2["ReplicaSet v1<br/>(1 pod)"]
+    D2 --&gt; RSN2["ReplicaSet v2<br/>(2 pods, ready)"]
+  end
+
+  subgraph T3 ["t=3  (complete)"]
+    D3["Deployment"] --&gt; RSO3["ReplicaSet v1<br/>(0 pods)"]
+    D3 --&gt; RSN3["ReplicaSet v2<br/>(3 pods)"]
+  end
+
+  T0 --&gt; T1 --&gt; T2 --&gt; T3
+</div>
+
 <h3>4.2 ReplicaSet</h3>
 
-<p>Maintains a stable set of replica Pods. <strong>You never create ReplicaSets directly</strong> — Deployments create them for you. Worth knowing about because rolling updates work by creating a new ReplicaSet and gradually shifting pods from old to new.</p>
+<p>Maintains a stable set of replica Pods. <strong>You never create ReplicaSets directly</strong> — Deployments create them for you. Worth knowing about because rolling updates work by creating a new ReplicaSet and gradually shifting pods from old to new (visualized above).</p>
 
 <h3>4.3 StatefulSet</h3>
 
@@ -264,6 +337,31 @@ spec:
   </tbody>
 </table>
 
+<div class="mermaid">
+flowchart TB
+  EXT["external client<br/>(browser, mobile app)"]
+  CLB["cloud load balancer<br/>(AWS ALB / GCP GLB)"]
+  NODE["any node's external IP<br/>:NodePort 30002"]
+  CIP["ClusterIP<br/>(virtual IP)"]
+
+  subgraph CLUSTER ["Cluster (internal)"]
+    direction TB
+    SVC["Service: matchscout-svc<br/>selector: app=matchscout<br/>port 80 → targetPort 8000"]
+    POD1["pod 1<br/>label: app=matchscout"]
+    POD2["pod 2<br/>label: app=matchscout"]
+    POD3["pod 3<br/>label: app=matchscout"]
+    INTAPP["other app inside cluster"]
+  end
+
+  EXT -.LoadBalancer.-&gt; CLB --&gt; NODE
+  EXT -.NodePort.-&gt; NODE
+  NODE --&gt; SVC
+  INTAPP -.ClusterIP.-&gt; CIP --&gt; SVC
+  SVC --&gt; POD1
+  SVC --&gt; POD2
+  SVC --&gt; POD3
+</div>
+
 <h3>NodePort — the home-server pattern</h3>
 
 <p>Used heavily in this curriculum's k3s setup (192.168.1.156). Kubernetes opens a port (e.g. 30002) on EVERY node in the cluster; traffic to <code>&lt;any-node-ip&gt;:30002</code> gets routed to a healthy pod behind the Service. The Kanban server, Kafka broker, and MongoDB are all exposed this way:</p>
@@ -299,6 +397,37 @@ ports:
 </code></pre>
 
 <p>Ingress controllers (NGINX, Traefik, AWS ALB Ingress Controller) implement the actual routing. <strong>k3s ships with Traefik out of the box.</strong></p>
+
+<div class="mermaid">
+flowchart LR
+  C["client<br/>browser / mobile"]
+
+  subgraph CLUSTER ["Cluster"]
+    ICTRL["Ingress controller<br/>(Traefik / NGINX / ALB)"]
+
+    subgraph SVCS ["Services + Pods"]
+      SVC1["matchscout-svc"]
+      SVC2["healthcheck-svc"]
+      SVC3["admin-svc"]
+
+      P1A["pods (matchscout)"]
+      P2A["pods (healthcheck)"]
+      P3A["pods (admin)"]
+
+      SVC1 --&gt; P1A
+      SVC2 --&gt; P2A
+      SVC3 --&gt; P3A
+    end
+  end
+
+  C --&gt; |"HTTPS<br/>api.example.com/v1/recommend"| ICTRL
+  C --&gt; |"HTTPS<br/>api.example.com/v1/health"| ICTRL
+  C --&gt; |"HTTPS<br/>admin.example.com/"| ICTRL
+
+  ICTRL --&gt; |"path: /v1/recommend"| SVC1
+  ICTRL --&gt; |"path: /v1/health"| SVC2
+  ICTRL --&gt; |"host: admin.*"| SVC3
+</div>
 
 <!-- ============================================================== -->
 <h2 id="config">6. Config &amp; Secrets</h2>

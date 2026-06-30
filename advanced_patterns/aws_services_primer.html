@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <title>AWS Services Reference for AI Engineers</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { useMaxWidth: true } });</script>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
          max-width: 1200px; margin: 2em auto; padding: 0 2em 4em 2em;
@@ -29,6 +31,8 @@
   .note { background: #eef4ff; border-color: #1a73e8; }
   .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 14px 18px;
              margin: 18px 0; border-radius: 4px; font-style: italic; }
+  .mermaid { background: #fafbfc; padding: 1em; border-radius: 6px; text-align: center;
+             margin: 1.2em 0; border: 1px solid #e0e6ee; }
 </style>
 </head>
 <body>
@@ -280,7 +284,90 @@ Amazon AWS Step Functions</strong></td><td>Simple Workflow (SWF): A web service 
 
 <h2 id="ai-engineer-cuts">Services an AI Engineer touches most</h2>
 
-<p>If you only have time to drill into a handful, prioritize these (in addition to Bedrock — see Appendix L):</p>
+<p>If you only have time to drill into a handful, prioritize these (in addition to Bedrock — see Appendix L).</p>
+
+<h3>Reference architecture — production AI service on AWS</h3>
+
+<p>Most production AI deployments converge on roughly this shape. Every box here is a service from the priority subset below.</p>
+
+<div class="mermaid">
+flowchart TB
+  USER["external client<br/>web / mobile / API consumer"]
+  R53["Route 53<br/>(DNS)"]
+  CF["CloudFront<br/>(CDN + caching)"]
+  APIGW["API Gateway<br/>(auth, rate limit, validation)"]
+
+  subgraph VPC ["VPC (private network)"]
+    subgraph EKS_CLUSTER ["EKS cluster"]
+      INGRESS["Ingress (ALB)"]
+      AGENT["agent pods<br/>(Deployment)"]
+      WORKER["GPU inference pods<br/>(StatefulSet)"]
+    end
+
+    LAMBDA["Lambda<br/>(event glue)"]
+    SQS["SQS<br/>(async task queue)"]
+    EVB["EventBridge<br/>(schema-routed events)"]
+    STEP["Step Functions<br/>(orchestration)"]
+
+    subgraph DATA ["Data tier"]
+      RDS["Aurora / RDS<br/>(structured)"]
+      DDB["DynamoDB<br/>(session state, cache)"]
+      ELASTI["ElastiCache<br/>(prompt cache, rate limit)"]
+      OPENS["OpenSearch<br/>(vector + text search)"]
+    end
+  end
+
+  S3[("S3<br/>artifacts, datasets,<br/>RAG corpus, traces")]
+  BEDROCK["Bedrock<br/>(Claude / Llama / Titan)"]
+
+  SECRETS["Secrets Manager<br/>(API keys)"]
+  KMS["KMS<br/>(encryption at rest)"]
+  IAM["IAM<br/>(authz on every call)"]
+
+  CW["CloudWatch<br/>(logs + metrics)"]
+  CT["CloudTrail<br/>(audit every API call)"]
+
+  USER --&gt; R53 --&gt; CF --&gt; APIGW --&gt; INGRESS
+  INGRESS --&gt; AGENT
+  AGENT --&gt; WORKER
+  AGENT --&gt; BEDROCK
+  AGENT --&gt; OPENS
+  AGENT --&gt; DDB
+  AGENT --&gt; ELASTI
+  AGENT --&gt; RDS
+  AGENT --&gt; S3
+  AGENT --&gt; SECRETS
+  AGENT --&gt; SQS --&gt; LAMBDA
+  LAMBDA --&gt; EVB --&gt; STEP
+  STEP --&gt; LAMBDA
+  AGENT --&gt; CW
+  WORKER --&gt; CW
+  S3 --&gt; KMS
+  RDS --&gt; KMS
+  IAM -.governs.-&gt; AGENT
+  IAM -.governs.-&gt; LAMBDA
+  IAM -.governs.-&gt; BEDROCK
+  CT -. logs all API calls .-&gt; CW
+</div>
+
+<h3>Pattern: event-driven serverless ingest</h3>
+
+<p>Common AWS-native pattern for "ingest new file → process → store" — heavily used in RAG document onboarding and any "user uploaded something, do AI on it" workflow.</p>
+
+<div class="mermaid">
+flowchart LR
+  USR["user uploads PDF"] --&gt; S3UP[("S3 bucket<br/>uploads/")]
+  S3UP -. S3 event notification .-&gt; LAMBDA1["Lambda<br/>chunk + embed"]
+  LAMBDA1 --&gt; BEDROCK_EMB["Bedrock / OpenAI<br/>embeddings"]
+  LAMBDA1 --&gt; PINECONE[("Pinecone / OpenSearch<br/>vector store")]
+  LAMBDA1 --&gt; DDB2[("DynamoDB<br/>chunk metadata")]
+  LAMBDA1 -. publish .-&gt; SNS["SNS topic"]
+  SNS --&gt; LAMBDA2["Lambda<br/>notify user"]
+  SNS --&gt; LAMBDA3["Lambda<br/>update dashboard"]
+</div>
+
+<p>The priority service list below maps directly to the architectures above:</p>
+
 
 <table>
   <thead><tr><th>Service</th><th>Why it matters for AI work</th></tr></thead>
