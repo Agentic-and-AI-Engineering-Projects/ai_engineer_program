@@ -109,7 +109,21 @@ def build_index(index, pdf_path: str, namespace: str):
     Each chunk becomes one record: (id, vector, metadata). The chunk text itself
     lives in metadata under key 'text' — so the query response gives us the text
     directly without a second fetch.
+
+    Re-ingest safety: we wipe the namespace before upsert. Chunk IDs are random
+    UUIDs (regenerated every run), and chunk boundaries shift when the source
+    document changes, so a plain upsert would accumulate orphaned chunks across
+    re-ingests. Wiping first guarantees the namespace reflects only the current
+    document state.
     """
+    # Step 0 — wipe any prior version of this document's chunks in this namespace
+    try:
+        index.delete(delete_all=True, namespace=namespace)
+        print(f"[ingest] wiped existing namespace '{namespace}' before re-ingest")
+    except Exception as e:
+        # Namespace may not exist yet on first run — that's fine
+        print(f"[ingest] namespace '{namespace}' not present yet (fresh ingest): {e.__class__.__name__}")
+
     # Step 1 — load PDF and split into overlapping chunks (same params as Qdrant variant)
     print(f"[ingest] loading {pdf_path}")
     loader = PyPDFLoader(pdf_path)

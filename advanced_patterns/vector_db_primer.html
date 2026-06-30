@@ -47,6 +47,7 @@
   <a href="#hybrid">7. Hybrid search</a>
   <a href="#chunks">8. Where the chunks live</a>
   <a href="#pick">9. Picking a vector DB</a>
+  <a href="#case-study">9.5. P2 DocTalk on Pinecone — case study</a>
   <a href="#interview">10. Interview answer</a>
 </nav>
 
@@ -190,6 +191,17 @@ The cleanest mental model: a vector DB is half search engine, half relational st
 </table>
 
 <p>Vector DB latency rarely dominates the end-to-end agent — the LLM call that follows the retrieval is typically 10–100× more expensive. But tail latency matters for high-fan-out agents and real-time UX.</p>
+
+<div class="good">
+<strong>Observed in P2 DocTalk Pinecone variant (2026-06-29 ingest of 22 MB / 289-chunk Mavic 2 manual):</strong>
+<ul>
+  <li><strong>Query latency (Pinecone console Metrics tab):</strong> p50 ≈ <strong>50ms</strong>, p95 ≈ 80ms, p99 ≈ 200ms (cold first query; warm queries drop into the 30–50ms p50 range)</li>
+  <li><strong>Upsert throughput:</strong> 289 chunks across 3 batches (100 + 100 + 89) — Pinecone serverless ingested in seconds; Write units spiked to ~9–12/s during batch upserts</li>
+  <li><strong>Record count chart:</strong> climbed from 0 → 289 during the ingest run, clearly visible on the Metrics tab</li>
+  <li><strong>Storage size:</strong> well under the 1 GB free-tier threshold for 289 × 1536-dim vectors + inline chunk-text metadata</li>
+</ul>
+The placeholder numbers in the table above held up: Pinecone serverless p50 ~50ms, p99 in the 100-200ms range. Most of that is network round-trip (us-east-1 → MBP in Bay Area), not HNSW search.
+</div>
 
 <!-- ================================================================= -->
 <h2 id="hnsw">4. HNSW deep dive — how vector search actually works</h2>
@@ -499,6 +511,37 @@ score(doc) = sum over each retriever of 1 / (k + rank_in_that_retriever)
 
 <p>One round trip, simple architecture. This is what P2 DocTalk does — when you call <code>collection.query(...)</code>, returned chunks come from the payload.</p>
 
+<div class="note">
+<strong>Verified in the Pinecone console (P2 DocTalk run):</strong> opening any record in the Browser tab of <code>doctalk-pinecone</code> shows the full inline payload — <code>namespace</code>, <code>id</code> (UUID4), the 1536-dim <code>values</code> array (collapsed), and <code>metadata</code> with three keys: <code>page</code> (the source page number), <code>source</code> (the PDF filename), and <code>text</code> (the actual chunk text — readable, multi-line). One round trip from query response gives you everything the LLM needs.
+</div>
+
+<h3>The re-ingest orphan problem (a real production gotcha)</h3>
+
+<p>If you re-ingest a document after editing it, you have to <strong>wipe the namespace first</strong>. A naive re-upsert leaves orphan chunks from the previous version sitting in the index forever, silently polluting future retrievals. Two flavors of why this happens:</p>
+
+<p><strong>(a) Random IDs (the common default).</strong> Chunks get a fresh <code>uuid.uuid4()</code> on each ingest run. New IDs don't collide with old IDs → upsert inserts everything new, deletes nothing old. After 5 re-ingests of the same doc, your index has 5× the vectors with the latest version mixed in among 4 older orphan versions.</p>
+
+<p><strong>(b) Content-hash IDs (the "smart" attempt that also fails).</strong> Picture you switch to <code>id = sha256(chunk_text)</code>, thinking same text always produces same ID and so re-upsert overwrites cleanly. The flaw: <strong>chunk boundaries shift when the source document changes.</strong> Insert one paragraph on page 3 of a 200-page document and every chunk from there to the end gets re-segmented by the splitter. Same downstream text, different chunk-window contents, completely different hashes. <code>RecursiveCharacterTextSplitter</code> slides its window by character position; it has no concept of "this paragraph is unchanged, keep its chunk stable." Even paragraph-aware semantic chunkers reduce but don't eliminate the boundary-shift problem.</p>
+
+<h4>The fix — wipe-then-rebuild</h4>
+
+<pre><code>def build_index(index, pdf_path, namespace):
+    # Step 0 — wipe any prior version of this document's chunks
+    try:
+        index.delete(delete_all=True, namespace=namespace)
+    except Exception:
+        pass   # namespace may not exist yet on first run — fine
+
+    # Step 1+ — normal chunk → embed → upsert loop
+    ...
+</code></pre>
+
+<p>Wrap the delete in try/except so the first-ever ingest doesn't blow up on <code>NotFoundError</code>. This is the same defensive idiom you'd use for any "delete-if-exists" idempotency case.</p>
+
+<div class="why">
+<strong>Why this matters for senior interviews:</strong> almost no candidate articulates this gotcha. The framing "I delete the namespace before re-upsert because chunk IDs change AND chunk boundaries shift on edits" shows production discipline most won't have. The wrong answer is "I use deterministic content-hash IDs to overwrite" — feels clever, doesn't survive a document edit.
+</div>
+
 <h3>Architecture B — chunks stored EXTERNALLY, only an ID in the vector DB</h3>
 
 <pre><code># In the vector DB:
@@ -552,6 +595,87 @@ chunks  = [s3.get(r.payload["external_ref"]) for r in top_ids]</code></pre>
   <li>You explicitly want vendor lock-in because the managed simplicity is worth it (legitimate choice)</li>
   <li>Recruiter signal — shows up in JDs more than the other two combined</li>
 </ul>
+
+<!-- ================================================================= -->
+<h2 id="case-study">9.5. P2 DocTalk on Pinecone — case study from a real run</h2>
+
+<p>This section captures concrete observations from the P2 DocTalk Pinecone variant — the same RAG pipeline that runs on Chroma in-memory and Qdrant in-memory, shipped to Pinecone serverless on 2026-06-29. The Pinecone web console exposes a remarkable amount of the system's internal state — using it as a sanity-check tool is a production discipline worth building.</p>
+
+<h3>The index</h3>
+
+<table>
+  <thead><tr><th>Property</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Index name</td><td><code>doctalk-pinecone</code></td></tr>
+    <tr><td>Cloud · region</td><td>AWS · us-east-1</td></tr>
+    <tr><td>Type</td><td>Dense (vs Sparse for BM25-style indexes)</td></tr>
+    <tr><td>Dimension · metric</td><td>1536 · cosine</td></tr>
+    <tr><td>Capacity mode</td><td>On-demand (serverless)</td></tr>
+    <tr><td>Host pattern</td><td><code>&lt;index&gt;-&lt;6-char-id&gt;.svc.&lt;region-id&gt;.pinecone.io</code></td></tr>
+  </tbody>
+</table>
+
+<h3>The namespace</h3>
+
+<p>One namespace per source document. After ingesting the Mavic 2 manual:</p>
+
+<table>
+  <thead><tr><th>Name</th><th>Records</th></tr></thead>
+  <tbody>
+    <tr><td><code>Mavic_2_Pro_Zoom_User_Manual_v20_en.pdf</code></td><td>289</td></tr>
+  </tbody>
+</table>
+
+<p>The console's Namespaces tab is the right place to verify ingest landed correctly — if the record count matches what your chunker produced, the ingest succeeded. If it's off, something filtered records out silently.</p>
+
+<h3>A record's anatomy (Browser tab → click any row)</h3>
+
+<pre><code>namespace: Mavic_2_Pro_Zoom_User_Manual_v20_en.pdf
+id:        03325257-5e3e-4b49-9cd0-383ab51d6027   ← UUID4, fresh per ingest
+values:    [...]   ← 1536 floats, collapsed in the console
+metadata:
+  page:    2
+  source:  "Mavic_2_Pro_Zoom_User_Manual_v20_en.pdf"
+  text:    "Intelligent Flight Modes 23\nAdvanced Pilot Assistance Systems 32\n..."</code></pre>
+
+<p>Three things this confirms:</p>
+<ul>
+  <li><strong>Inline metadata works.</strong> The chunk text is right there in <code>metadata.text</code>, ready to feed the LLM with no second round trip.</li>
+  <li><strong>UUID4 IDs are non-deterministic.</strong> Re-ingesting the same PDF produces different IDs → must wipe the namespace first (<code>index.delete(delete_all=True, namespace=ns)</code>) to avoid orphan accumulation.</li>
+  <li><strong>The Browser tab is a debugger.</strong> If your LLM is returning weird answers, open the Browser tab, find a record from the relevant page, and verify the chunk text is what you'd expect. Often the bug is in the chunking, not the retrieval.</li>
+</ul>
+
+<h3>What the Metrics tab shows during an ingest</h3>
+
+<table>
+  <thead><tr><th>Chart</th><th>Observed pattern</th></tr></thead>
+  <tbody>
+    <tr><td>Read units</td><td>Flat near 0 during ingest, spiked to ~0.025/s during the post-ingest query</td></tr>
+    <tr><td>Write units</td><td>Two spikes to ~9/s and ~12/s — corresponding to the three batched upsert calls</td></tr>
+    <tr><td>Requests per second (by op type)</td><td>Mostly <code>Upsert</code> during ingest, <code>List</code> during console browsing, <code>Query</code> for retrieval</td></tr>
+    <tr><td>Request latency (Query)</td><td>p50 ≈ 50ms, p95 ≈ 80ms, p99 ≈ 200ms on first cold query; warm queries land in the 30–50ms p50 range</td></tr>
+    <tr><td>Storage size</td><td>Under 1 GB (free tier); 289 × 1536-dim float vectors + metadata = ~2 MB raw</td></tr>
+    <tr><td>Record count</td><td>Step-function climb from 0 → 289 during the ingest</td></tr>
+  </tbody>
+</table>
+
+<p><strong>The Metrics tab is your production observability dashboard, free.</strong> Read units / write units map directly to billing — if you see surprise spikes, you have your culprit. Per-operation request rates surface which downstream code path is generating traffic. The latency chart is the first place to look when "the agent feels slow."</p>
+
+<h3>Two failure modes seen in this run</h3>
+
+<div class="bad">
+<strong>(1) OpenAI 429 <code>insufficient_quota</code> mid-ingest.</strong> The embedding call (separate from Pinecone) failed because the OpenAI account had no credits. Symptoms looked like a Pinecone failure but the traceback showed <code>openai.RateLimitError</code>. Lesson: production multi-provider stacks need budget alerts and quota monitoring <em>per provider</em>, not just per Pinecone. The error code <code>insufficient_quota</code> is billing, not rate-limiting — <code>rate_limit_exceeded</code> is the actual rate-limit code.
+</div>
+
+<div class="bad">
+<strong>(2) <code>NotFoundError</code> on first namespace wipe.</strong> The re-ingest-safety pattern calls <code>index.delete(delete_all=True, namespace=ns)</code> before upsert, which raises <code>NotFoundError</code> on the very first ingest when the namespace doesn't exist yet. Solution: wrap in try/except, log it as "fresh ingest" rather than treating it as an error. This is the same defensive pattern you'd use for any "delete-if-exists" idempotency idiom.
+</div>
+
+<h3>The senior takeaway from this case study</h3>
+
+<div class="why">
+The Pinecone web console gives you four production-grade tools out of the box: <strong>(1)</strong> Namespaces tab to verify ingest landed, <strong>(2)</strong> Browser tab to inspect any record's payload as a debugger, <strong>(3)</strong> Metrics tab as your observability dashboard (free, with read/write units that map to billing), <strong>(4)</strong> Configuration tab for index spec. Senior engineers reach for the console first when "the agent feels off" before diving into logs — it's faster, and the visual chart pattern often surfaces the real problem (a spike, a stuck offset, a quiet write rate) before logs even catch up.
+</div>
 
 <!-- ================================================================= -->
 <h2 id="interview">10. The 90-second interview answer</h2>

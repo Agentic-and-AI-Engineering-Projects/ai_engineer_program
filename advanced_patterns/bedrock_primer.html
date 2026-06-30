@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AWS Bedrock Primer for AI Engineers</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 1100px; margin: 2em auto; padding: 0 2em 4em 2em;
+         line-height: 1.6; color: #222; font-size: 16px; }
+  h1 { color: #1a1a1a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.35em; }
+  h2 { color: #1a73e8; margin-top: 2.5em; padding: 0.4em 0.7em; background: #f0f7ff;
+       border-left: 5px solid #1a73e8; border-radius: 0 4px 4px 0; }
+  h3 { color: #2c3e50; margin-top: 1.7em; }
+  h4 { color: #444; margin-top: 1.3em; margin-bottom: 0.4em; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em;
+        overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+  code { background: #f0f0f0; padding: 0.08em 0.32em; border-radius: 3px;
+         font-family: "SF Mono", Consolas, monospace; font-size: 0.92em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+  th, td { border: 1px solid #d0d7de; padding: 0.55em 0.85em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  nav { background: #f0f7ff; padding: 0.8em 1.2em; border-radius: 6px; margin: 1em 0 2em 0; }
+  nav a { color: #1a73e8; margin-right: 1.1em; text-decoration: none; }
+  .callout { padding: 12px 16px; margin: 14px 0; border-radius: 4px; border-left: 4px solid; }
+  .note { background: #eef4ff; border-color: #1a73e8; }
+  .why  { background: #fff8e6; border-color: #f9a825; }
+  .good { background: #e6f4ea; border-color: #34a853; }
+  .bad  { background: #fce8e6; border-color: #ea4335; }
+  .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 14px 18px;
+             margin: 18px 0; border-radius: 4px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>AWS Bedrock Primer for AI Engineers</h1>
+<p><em>What Bedrock actually is, how it relates to direct Anthropic API access, what boto3 brings to the table, and why enterprise JDs keep mentioning it. Anchored to the P2.5 Bedrock Primer exercise.</em></p>
+
+<nav>
+  <strong>Sections:</strong>
+  <a href="#what">1. What Bedrock actually is</a>
+  <a href="#topology">2. Same model, multiple hosts</a>
+  <a href="#why">3. Why enterprises pick Bedrock</a>
+  <a href="#boto3">4. boto3 fundamentals</a>
+  <a href="#three-paths">5. Three ways to call Claude</a>
+  <a href="#invoke">6. The invoke flow</a>
+  <a href="#model-ids">7. Model IDs &amp; inference profiles</a>
+  <a href="#setup">8. Setup checklist</a>
+  <a href="#pricing">9. Pricing reality</a>
+  <a href="#errors">10. Common errors</a>
+  <a href="#interview">11. Interview answer</a>
+</nav>
+
+<!-- ============================================================== -->
+<h2 id="what">1. What Bedrock actually is</h2>
+
+<p>AWS Bedrock is a <strong>thin AWS wrapper around third-party foundation models</strong> — Anthropic's Claude, Meta's Llama, AI21's Jamba, Cohere's Command, plus Amazon's own Titan and Nova lines. The model weights live on AWS infrastructure; you call them through a standard AWS SDK pattern with IAM authentication.</p>
+
+<p>It's <em>not</em> a model. It's an access layer. Same Claude weights, AWS-hosted deployment, AWS-billed, AWS-IAM-controlled.</p>
+
+<div class="summary">
+The cleanest one-liner: Bedrock = "all your favorite foundation models, but routed through AWS so they fit inside your existing AWS security perimeter, billing, and audit trail."
+</div>
+
+<!-- ============================================================== -->
+<h2 id="topology">2. Same model, multiple hosts</h2>
+
+<p>Claude is <strong>deployed in multiple places</strong>. The weights are the same; the infrastructure isn't.</p>
+
+<table>
+  <thead><tr><th>Where</th><th>Endpoint</th><th>Run by</th></tr></thead>
+  <tbody>
+    <tr><td>Anthropic's own infrastructure</td><td><code>api.anthropic.com</code></td><td>Anthropic</td></tr>
+    <tr><td><strong>AWS Bedrock</strong></td><td><code>bedrock-runtime.&lt;region&gt;.amazonaws.com</code></td><td><strong>AWS</strong> (Anthropic licensed the model weights to them)</td></tr>
+    <tr><td>Google Cloud Vertex AI</td><td>Google's Vertex endpoints</td><td>Google</td></tr>
+  </tbody>
+</table>
+
+<p>It's a B2B distribution deal: Anthropic gives AWS the model weights and gets paid through Bedrock revenue share. When you call Bedrock, your request never touches Anthropic's network — it stays inside AWS the entire time.</p>
+
+<h3>What changes per endpoint</h3>
+
+<table>
+  <thead><tr><th>Dimension</th><th>Direct (api.anthropic.com)</th><th>Bedrock</th></tr></thead>
+  <tbody>
+    <tr><td>Latency</td><td>Anthropic's regional edge</td><td>AWS region you picked (often co-located with your other AWS resources)</td></tr>
+    <tr><td>Network path</td><td>Public internet to Anthropic</td><td>Can be VPC-peered, stay private to AWS</td></tr>
+    <tr><td>Billing</td><td>Anthropic invoice / credit card</td><td>Your AWS bill (rolls up with everything else)</td></tr>
+    <tr><td>IAM / audit</td><td>Anthropic API keys, Anthropic-side logs</td><td>AWS IAM roles, CloudTrail audit, account-wide policy controls</td></tr>
+    <tr><td>Compliance</td><td>Anthropic's SOC 2</td><td>AWS SOC 2 + HIPAA + FedRAMP + IL5 + regional residency guarantees</td></tr>
+    <tr><td>Pricing per token</td><td>~$3 in / $15 out per 1M (Sonnet 4.6)</td><td><strong>Same per-token rate — no Bedrock surcharge</strong></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================== -->
+<h2 id="why">3. Why enterprises pick Bedrock</h2>
+
+<p>For a solo developer prototyping: direct API is simpler — one key, one provider, done.</p>
+
+<p>For an enterprise: Bedrock wins because <strong>AWS is already the trust boundary.</strong> The CISO has already approved AWS for sensitive data; adding Anthropic as a separate vendor means:</p>
+
+<ul>
+  <li>Separate procurement cycle</li>
+  <li>Separate security review (SOC 2 attestation, data-processing agreement)</li>
+  <li>Separate audit logs (Anthropic's vs your CloudTrail)</li>
+  <li>Separate billing reconciliation</li>
+  <li>Separate quota and credential rotation</li>
+</ul>
+
+<p>Routing Claude through Bedrock collapses all of that into "it's just another AWS service." That's the entire reason Bedrock exists. Anthropic gets enterprise distribution they couldn't easily build themselves; AWS gets to claim "we have Claude" in their pitch; enterprises get one bill and one compliance perimeter.</p>
+
+<div class="why">
+<strong>Interview signal:</strong> "I built X on Bedrock" lands harder than "I called the Anthropic API" because it signals you can navigate IAM + AWS billing + compliance plumbing — the boring infrastructure work that separates a prototype from a production system.
+</div>
+
+<!-- ============================================================== -->
+<h2 id="boto3">4. boto3 fundamentals</h2>
+
+<p><code>boto3</code> is the official AWS SDK for Python. Think of it as "what <code>anthropic</code> is to api.anthropic.com, what <code>openai</code> is to api.openai.com — <code>boto3</code> is to AWS." But AWS has 200+ services, so boto3 is structured as a <strong>per-service client</strong>.</p>
+
+<h3>The basic pattern</h3>
+
+<pre><code>import boto3
+
+# 1. Create a client for a specific AWS service
+s3 = boto3.client("s3")
+
+# 2. Call methods that map 1:1 to that service's REST API actions
+buckets = s3.list_buckets()
+s3.put_object(Bucket="mybucket", Key="foo.txt", Body=b"hello")
+</code></pre>
+
+<p>Every AWS service follows this same shape. Just swap the service name:</p>
+
+<pre><code>ec2 = boto3.client("ec2");           ec2.describe_instances()
+dynamodb = boto3.client("dynamodb"); dynamodb.put_item(...)
+bedrock = boto3.client("bedrock");   bedrock.list_foundation_models()
+</code></pre>
+
+<p><strong>Method names always match AWS API actions in snake_case.</strong> AWS docs say <code>ListFoundationModels</code>, boto3 method is <code>list_foundation_models</code>. Navigating any AWS service in Python becomes mechanical once you know this pattern.</p>
+
+<h3>How auth works — the credentials chain</h3>
+
+<p>You <strong>never pass credentials in code</strong>. boto3 looks for them automatically in this order:</p>
+
+<ol>
+  <li><strong>Environment variables</strong> — <code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, <code>AWS_REGION</code></li>
+  <li><strong><code>~/.aws/credentials</code> file</strong> — what <code>aws configure</code> writes to</li>
+  <li><strong><code>~/.aws/config</code> file</strong> — for profiles, SSO, region defaults</li>
+  <li><strong>IAM role</strong> — if running on EC2 / Lambda / ECS / EKS, the attached role's temporary credentials</li>
+  <li><strong>Container credentials</strong> — for ECS task roles</li>
+  <li><strong>EC2 instance metadata</strong> — fallback for EC2</li>
+</ol>
+
+<p>First match wins. For the P2.5 primer, boto3 reads <code>~/.aws/credentials</code> because you ran <code>aws configure</code>. Zero credential code needed in the script.</p>
+
+<h3>Region matters</h3>
+
+<p>AWS services are <strong>regional</strong>. The same boto3 client pointed at <code>us-east-1</code> and <code>eu-west-1</code> talks to two completely different infrastructures (different S3 buckets, different Bedrock models available, different latency, different prices).</p>
+
+<pre><code>boto3.client("bedrock", region_name="us-east-1")    # per-client (explicit, recommended)
+# OR
+export AWS_REGION=us-east-1                          # env var
+# OR
+# ~/.aws/config:  [default] region = us-east-1
+</code></pre>
+
+<h3>Two clients for Bedrock — control plane vs data plane</h3>
+
+<table>
+  <thead><tr><th>Client</th><th>Role</th><th>Common calls</th></tr></thead>
+  <tbody>
+    <tr><td><code>boto3.client("bedrock")</code></td><td>Control plane</td><td><code>list_foundation_models</code>, <code>list_inference_profiles</code>, <code>describe_*</code></td></tr>
+    <tr><td><code>boto3.client("bedrock-runtime")</code></td><td>Data plane</td><td><code>invoke_model</code>, <code>invoke_model_with_response_stream</code></td></tr>
+  </tbody>
+</table>
+
+<p>AWS splits "management" from "data" across many services. You need both for Bedrock: <code>bedrock</code> to discover models, <code>bedrock-runtime</code> to actually call them.</p>
+
+<!-- ============================================================== -->
+<h2 id="three-paths">5. Three ways to call Claude</h2>
+
+<p>This is the conceptual pivot most engineers miss. There are three distinct access paths, each with different auth and different code:</p>
+
+<table>
+  <thead><tr><th>What you write</th><th>Path</th><th>Auth</th></tr></thead>
+  <tbody>
+    <tr><td><code>anthropic.Anthropic()</code></td><td><strong>Direct Anthropic API</strong></td><td><code>ANTHROPIC_API_KEY</code> env var</td></tr>
+    <tr><td><code>boto3.client("bedrock-runtime")</code></td><td><strong>Raw Bedrock</strong> (what our primer uses)</td><td>AWS IAM credentials</td></tr>
+    <tr><td><code>anthropic.AnthropicBedrock()</code></td><td><strong>Anthropic SDK pointing at Bedrock</strong></td><td>AWS IAM credentials</td></tr>
+  </tbody>
+</table>
+
+<h3>The third option deserves explanation</h3>
+
+<p>The Anthropic SDK ships a Bedrock-flavored client (<code>AnthropicBedrock</code>) that uses the <strong>same Messages API surface</strong> as <code>anthropic.Anthropic()</code> but routes through Bedrock under the hood. No <code>ANTHROPIC_API_KEY</code> needed:</p>
+
+<pre><code>from anthropic import AnthropicBedrock
+
+client = AnthropicBedrock(
+    aws_region="us-east-1"
+    # AWS credentials auto-resolved from ~/.aws/credentials, env vars, IAM role
+)
+
+response = client.messages.create(
+    model="anthropic.claude-sonnet-4-6",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.content[0].text)
+</code></pre>
+
+<p>Internally it builds the AWS-signed request, adds the <code>anthropic_version: bedrock-2023-05-31</code> envelope, parses the response — exactly what raw boto3 does, but hidden behind a clean interface. <strong>Drop-in swap for production code that currently uses <code>anthropic.Anthropic()</code>.</strong></p>
+
+<h3>When to use which</h3>
+
+<table>
+  <thead><tr><th>Use case</th><th>Pick</th></tr></thead>
+  <tbody>
+    <tr><td>Dev / personal projects, Anthropic-only</td><td><code>anthropic.Anthropic()</code> (direct)</td></tr>
+    <tr><td>Enterprise / production / multi-provider stack</td><td><code>AnthropicBedrock()</code> or raw <code>boto3</code></td></tr>
+    <tr><td>Quick AWS API understanding / wire-format demo</td><td>Raw <code>boto3.client("bedrock-runtime")</code></td></tr>
+    <tr><td>Drop-in swap from direct API → Bedrock with minimal code change</td><td><code>AnthropicBedrock()</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================== -->
+<h2 id="invoke">6. The invoke flow</h2>
+
+<p>Raw boto3 invocation, line by line:</p>
+
+<pre><code>import json
+import boto3
+
+runtime = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+request_body = {
+    "anthropic_version": "bedrock-2023-05-31",   # required envelope marker
+    "max_tokens": 256,
+    "messages": [{"role": "user", "content": "Hello"}],
+}
+
+response = runtime.invoke_model(
+    modelId="anthropic.claude-sonnet-4-6",
+    body=json.dumps(request_body).encode("utf-8"),
+    contentType="application/json",
+    accept="application/json",
+)
+
+# Response body is a streaming object — read it once
+body = json.loads(response["body"].read())
+
+print(body["content"][0]["text"])
+print(f"Tokens: in={body['usage']['input_tokens']} out={body['usage']['output_tokens']}")
+</code></pre>
+
+<h3>Key details</h3>
+
+<ul>
+  <li><strong><code>anthropic_version: bedrock-2023-05-31</code></strong> — required by Bedrock. It's an envelope marker letting the same <code>invoke_model</code> method serve multiple model families. Without it, Bedrock can't route the body to the right adapter.</li>
+  <li><strong>Body is bytes, not a dict</strong> — must JSON-encode and UTF-8 encode before sending.</li>
+  <li><strong>Response body is a stream</strong> — call <code>.read()</code> once to consume it; calling it again yields an empty buffer.</li>
+  <li><strong>Everything inside the body (except <code>anthropic_version</code>) is the same Anthropic Messages API you already know</strong> — same <code>messages</code> shape, same <code>max_tokens</code>, same response structure. Bedrock just wraps it.</li>
+</ul>
+
+<h3>For streaming responses</h3>
+
+<pre><code>response = runtime.invoke_model_with_response_stream(
+    modelId="anthropic.claude-sonnet-4-6",
+    body=json.dumps(request_body).encode("utf-8"),
+)
+
+for event in response["body"]:
+    chunk = json.loads(event["chunk"]["bytes"])
+    if chunk["type"] == "content_block_delta":
+        print(chunk["delta"]["text"], end="", flush=True)
+</code></pre>
+
+<!-- ============================================================== -->
+<h2 id="model-ids">7. Model IDs &amp; inference profiles</h2>
+
+<p>Bedrock has two flavors of model identifier:</p>
+
+<table>
+  <thead><tr><th>Type</th><th>Example</th><th>Behavior</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Plain region-pinned ID</strong></td><td><code>anthropic.claude-sonnet-4-6</code></td><td>Runs in your client's region. Single-region quota.</td></tr>
+    <tr><td><strong>Cross-region inference profile</strong></td><td><code>us.anthropic.claude-sonnet-4-6</code></td><td>Bedrock routes the call across multiple US regions transparently. 2-3× higher effective rate limits at no cost difference.</td></tr>
+  </tbody>
+</table>
+
+<p>To see what's available in your account:</p>
+
+<pre><code># List all Claude models in your region
+aws bedrock list-foundation-models \
+    --region us-east-1 \
+    --query "modelSummaries[?providerName=='Anthropic'].[modelId,modelName]" \
+    --output table
+
+# List all cross-region inference profiles
+aws bedrock list-inference-profiles --region us-east-1
+</code></pre>
+
+<p><strong>Production almost always uses cross-region.</strong> The <code>us.</code> prefix gets you 2-3× more throughput for the same workload, with better tail-latency resilience (one region's outage doesn't kill the call). Pricing is identical.</p>
+
+<!-- ============================================================== -->
+<h2 id="setup">8. Setup checklist</h2>
+
+<p>What it takes to go from "no AWS account" to "running the P2.5 primer." Roughly 10-15 minutes if you don't have an AWS account; 5 minutes if you do.</p>
+
+<h3>One-time setup</h3>
+
+<ol>
+  <li><strong>AWS account</strong> — Sign up at https://aws.amazon.com if you don't have one. Free tier covers our exercise (Bedrock has no free tier, but our spend is pennies).</li>
+  <li><strong>IAM user with AdministratorAccess</strong> — In the IAM console: Users → Create user → attach <code>AdministratorAccess</code> policy. Recommended over root user keys per AWS best practice.</li>
+  <li><strong>Access keys for that user</strong> — User → Security credentials → Create access key → CLI use case → download the CSV. Keys look like <code>AKIA...</code> (access key) and a 40-char secret. <strong>Never commit these or paste into chat.</strong></li>
+  <li><strong>Configure AWS CLI</strong>:
+    <pre><code>aws configure
+# AWS Access Key ID: AKIA...
+# AWS Secret Access Key: (the secret)
+# Default region: us-east-1
+# Default output format: json
+</code></pre>
+  </li>
+  <li><strong>Install boto3</strong>: <code>pip install boto3</code></li>
+  <li><strong>Verify</strong>: <code>aws sts get-caller-identity</code> should print your account ID + IAM user ARN.</li>
+</ol>
+
+<h3>Model access (recent change — auto-enabled)</h3>
+
+<p>As of 2026, AWS retired the explicit "Model Access" page. Serverless foundation models <strong>auto-enable on first invocation</strong> in any AWS commercial region. For Anthropic models specifically, first-time users may see a use-case form before the first invoke succeeds.</p>
+
+<p>If you hit <code>AccessDeniedException</code> on the first invoke, navigate to Bedrock Console → <strong>Model catalog</strong> → click the Claude model → fill in the use-case form (typical answers: "internal R&amp;D / developer prototype"). Approval is usually instant for Anthropic models in US regions.</p>
+
+<!-- ============================================================== -->
+<h2 id="pricing">9. Pricing reality</h2>
+
+<p>The good news for the curriculum: <strong>Bedrock costs pennies for our exercises.</strong></p>
+
+<table>
+  <thead><tr><th>Claude Sonnet 4.6 pricing (approx)</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td>Per million input tokens</td><td>~$3.00</td></tr>
+    <tr><td>Per million output tokens</td><td>~$15.00</td></tr>
+    <tr><td>P2.5 primer single test call (~20 in, ~50 out)</td><td>~$0.0008</td></tr>
+    <tr><td>P13 full MatchScout V2 build on Bedrock (estimated)</td><td>$5–20 total</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Bedrock charges the same per-token rate as direct Anthropic API.</strong> No Bedrock surcharge. You're paying for AWS-side conveniences (IAM, billing rollup, audit logs), not for the model access itself.</p>
+
+<p><strong>AWS does NOT offer a Bedrock free tier currently</strong> (different from EC2/S3 free tier). It's pay-per-use from request #1, but the per-call cost is tiny.</p>
+
+<div class="good">
+<strong>Set a budget alarm anyway (3 minutes, free):</strong> https://console.aws.amazon.com/billing/home → Budgets → Create budget → set monthly threshold like $20 → email alert at 80%. Catches surprises before they become bills.
+</div>
+
+<h3>Cost tracking pattern (reuse from P7 MatchScout)</h3>
+
+<pre><code>input_tokens  = response_body["usage"]["input_tokens"]
+output_tokens = response_body["usage"]["output_tokens"]
+
+cost_usd = (
+    input_tokens  * 3.00  / 1_000_000
+    + output_tokens * 15.00 / 1_000_000
+)
+
+# Persist cost_usd on every call → aggregate by tenant, model, prompt version
+</code></pre>
+
+<p>Same pattern P7 MatchScout uses with the <code>cost_usd</code> column. Per-call cost persistence is the foundation of all production cost discipline — alerts, per-tenant budgets, prompt-version cost A/Bs all build on this.</p>
+
+<!-- ============================================================== -->
+<h2 id="errors">10. Common errors</h2>
+
+<p>All Bedrock errors raise <code>botocore.exceptions.ClientError</code>. The interesting detail is in <code>e.response["Error"]</code>:</p>
+
+<pre><code>from botocore.exceptions import ClientError
+
+try:
+    runtime.invoke_model(modelId="anthropic.claude-sonnet-4-6", body=...)
+except ClientError as e:
+    code = e.response["Error"]["Code"]        # e.g. "AccessDeniedException"
+    msg = e.response["Error"]["Message"]      # human-readable
+    print(f"{code}: {msg}")
+</code></pre>
+
+<table>
+  <thead><tr><th>Error code</th><th>Typical cause</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td><code>AccessDeniedException</code></td><td>Model access not yet granted, OR IAM policy missing</td><td>Visit Bedrock console → Model catalog → request access; or attach <code>bedrock:InvokeModel</code> to IAM</td></tr>
+    <tr><td><code>ResourceNotFoundException</code></td><td>Wrong model ID or wrong region</td><td>Verify model ID with <code>aws bedrock list-foundation-models</code>; confirm region matches</td></tr>
+    <tr><td><code>ValidationException</code></td><td>Malformed request body (missing <code>anthropic_version</code>, wrong message shape, etc.)</td><td>Read the error message — it's usually specific</td></tr>
+    <tr><td><code>ThrottlingException</code></td><td>Hit rate limit on the model</td><td>Retry with exponential backoff; for production, switch to cross-region inference profile</td></tr>
+    <tr><td><code>ServiceQuotaExceededException</code></td><td>Account-level quota hit</td><td>Request quota increase in Service Quotas console</td></tr>
+    <tr><td><code>UnrecognizedClientException</code></td><td>Bad AWS credentials</td><td><code>aws sts get-caller-identity</code> to diagnose</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================== -->
+<h2 id="interview">11. The 90-second interview answer</h2>
+
+<div class="summary">
+"AWS Bedrock is a thin AWS access layer over third-party foundation models — Claude, Llama, Cohere, plus Amazon's own. Same model weights as the direct Anthropic API, different deployment: the model runs on AWS infrastructure, authenticated via IAM, billed through AWS, audited through CloudTrail. The reason enterprises pick Bedrock over the direct API isn't performance or pricing — pricing is per-token-equivalent — it's the trust boundary. AWS is already approved by the CISO; adding Claude through Bedrock means one bill, one compliance perimeter, one IAM model.
+<br><br>
+You access Bedrock through boto3 with two clients: <code>bedrock</code> for control-plane operations like listing models, and <code>bedrock-runtime</code> for actually invoking them. The invoke flow uses <code>invoke_model(modelId, body)</code> where the body is the standard Anthropic Messages API wrapped in a Bedrock envelope (<code>anthropic_version: bedrock-2023-05-31</code>). There are three ways to call Claude in practice: <code>anthropic.Anthropic()</code> for direct API, <code>boto3.client('bedrock-runtime')</code> for raw Bedrock, or <code>anthropic.AnthropicBedrock()</code> which is the Anthropic SDK pointing at Bedrock — same Messages API, AWS credentials underneath. For production-grade code I'd pick AnthropicBedrock; for understanding the wire format, raw boto3.
+<br><br>
+Model IDs come in two flavors: region-pinned (<code>anthropic.claude-sonnet-4-6</code>) and cross-region inference profiles (<code>us.anthropic.claude-sonnet-4-6</code>) that route across multiple AWS regions for 2-3× higher rate limits at no cost difference — production should default to cross-region. Common failure modes are AccessDeniedException (model access not granted), ResourceNotFoundException (wrong model ID or region), and ThrottlingException (hit rate limit). Pricing matches direct Anthropic per-token; the value-add is the AWS infrastructure wrapping, not a different model."
+</div>
+
+</body>
+</html>

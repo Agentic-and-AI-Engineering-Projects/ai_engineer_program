@@ -20,19 +20,19 @@ Chroma is covered in the curriculum via `embed_intro.py` and the Onemyle Chatbot
 - Chunking: `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)`
 - LLM: `claude-sonnet-4-6`, `max_tokens=1024`
 
-## Observations (to fill in after running)
+## Observations (first run captured 2026-06-29)
 
 | Dimension | Qdrant in-mem | Pinecone serverless |
 |---|---|---|
-| Lines of code | TBD | TBD |
-| First-ingest latency (PDF → index queryable) | TBD | TBD |
-| Query p50 latency (embed + query + LLM) | TBD | TBD |
-| Query p50 latency (embed + query only, no LLM) | TBD | TBD |
-| Setup friction (account/auth/install) | None — pip install only | API key signup + `pinecone>=5.0` |
-| Index persistence between runs | None (`:memory:`) | Persistent (managed cloud) |
-| Cost at this workload | $0 | $0 (free tier) |
-| Recall / answer quality | TBD | TBD |
-| API ergonomics — `create + upsert + query` | TBD | TBD |
+| Lines of code | ~70 | ~190 (extra: idempotent index create, batched upsert, namespace mgmt) |
+| First-ingest setup | `:memory:` — instant | Account signup + API key + `pip install pinecone>=5.0` |
+| Index creation latency | N/A (in-memory) | ~10–30 sec (async, must poll `status.ready`) |
+| Ingest wall-clock (289 chunks, 22 MB Mavic manual) | n/a (separate run) | PDF load ~30–60 sec + embed ~10 sec + 3 batched upserts |
+| Recall / answer quality | n/a | 3/3 retrieved chunks relevant; cosine 0.59–0.62; Claude answer fully grounded with page citations |
+| Index persistence between runs | None | Persistent (managed cloud) — namespace survives, re-ingest wipes & rebuilds |
+| Cost at this workload | $0 | $0 (free tier; ~$0.001 OpenAI embedding cost) |
+| Console visibility | None | Pinecone web console shows: index spec (AWS us-east-1, Dense, 1536 dims, On-demand), namespace browse with inline metadata (text + page), per-call metrics |
+| Failure modes observed | n/a | (a) OpenAI 429 `insufficient_quota` — billing issue (fixed by topping up $5). (b) NotFoundError on first namespace delete — handled gracefully (re-ingest safety pattern). |
 
 ## When I'd pick each (preliminary)
 
@@ -56,6 +56,10 @@ Concepts the Pinecone variant demonstrates that the Qdrant in-memory version doe
 - **Batch upsert** — Pinecone caps batches at ~100 records / 2MB; we chunk our records accordingly
 - **Metadata-inline-vs-external decision** — we chose inline (chunk text in metadata) so query responses include text directly
 
-## What surprised me (to fill in)
+## What surprised me (first run)
 
-- TBD after running
+- **Cosine scores were modest (0.59–0.62) even on a clean RTH question.** `text-embedding-3-small` doesn't push scores to 0.9+ on procedural-manual content — the right framing is "relative rank, not absolute confidence." All three top-3 results were genuinely relevant despite the modest absolute numbers.
+- **Async index creation requires a poll loop.** Pinecone returns from `create_index()` immediately, but the index isn't queryable until `describe_index().status.ready == True`. Add ~10–30 sec to first-run wall-clock for this. Idempotent re-runs skip it.
+- **Re-ingest safety needs `index.delete(delete_all=True, namespace=...)` BEFORE upsert.** UUID4 chunk IDs + shifting chunk boundaries on doc updates means a plain upsert would accumulate orphans. The wipe-then-rebuild pattern is what production teams actually do.
+- **Pinecone web console shows the namespace + browseable metadata immediately** — chunk text inline in the payload is right there in the Browse tab. Useful sanity-check that the ingest landed correctly.
+- **OpenAI billing is a separate failure surface from Pinecone.** Got a 429 `insufficient_quota` mid-ingest; topping up $5 cleared it for thousands of future runs. Worth noting that production systems on multi-provider stacks need budget alerts per provider, not just per Pinecone.

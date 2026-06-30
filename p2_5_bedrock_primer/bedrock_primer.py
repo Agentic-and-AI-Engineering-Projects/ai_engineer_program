@@ -78,9 +78,11 @@ load_dotenv()
 # Bedrock configuration
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-# Cross-region inference profile — prefer this over the plain region-pinned ID
-# in production. Bedrock routes the call across regions transparently.
-BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
+# Plain region-pinned model ID — confirmed available in us-east-1.
+# For production, you'd typically swap to a cross-region inference profile
+# (e.g. "us.anthropic.claude-sonnet-4-6") for 2-3x higher rate limits at
+# no cost difference. The primer prints available profiles so you can swap.
+BEDROCK_MODEL_ID = "anthropic.claude-sonnet-4-6"
 
 # Direct Anthropic API model name (same model, different access path)
 ANTHROPIC_MODEL_ID = "claude-sonnet-4-6"
