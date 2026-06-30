@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kubernetes Primer for AI Engineers</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 1100px; margin: 2em auto; padding: 0 2em 4em 2em;
+         line-height: 1.6; color: #222; font-size: 16px; }
+  h1 { color: #1a1a1a; border-bottom: 3px solid #1a73e8; padding-bottom: 0.35em; }
+  h2 { color: #1a73e8; margin-top: 2.5em; padding: 0.4em 0.7em; background: #f0f7ff;
+       border-left: 5px solid #1a73e8; border-radius: 0 4px 4px 0; }
+  h3 { color: #2c3e50; margin-top: 1.7em; }
+  h4 { color: #444; margin-top: 1.3em; margin-bottom: 0.4em; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em;
+        overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+  code { background: #f0f0f0; padding: 0.08em 0.32em; border-radius: 3px;
+         font-family: "SF Mono", Consolas, monospace; font-size: 0.92em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+  th, td { border: 1px solid #d0d7de; padding: 0.55em 0.85em; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  nav { background: #f0f7ff; padding: 0.8em 1.2em; border-radius: 6px; margin: 1em 0 2em 0; }
+  nav a { color: #1a73e8; margin-right: 1.1em; text-decoration: none; }
+  .callout { padding: 12px 16px; margin: 14px 0; border-radius: 4px; border-left: 4px solid; }
+  .note { background: #eef4ff; border-color: #1a73e8; }
+  .why  { background: #fff8e6; border-color: #f9a825; }
+  .good { background: #e6f4ea; border-color: #34a853; }
+  .bad  { background: #fce8e6; border-color: #ea4335; }
+  .summary { background: #fff8dc; border-left: 5px solid #d4a017; padding: 14px 18px;
+             margin: 18px 0; border-radius: 4px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Kubernetes Primer for AI Engineers</h1>
+<p><em>Just enough Kubernetes to deploy and operate agentic AI systems in production. The conceptual map, the primitives you'll actually use, the commands you'll type every day, and the 90-second interview answer. Anchored to the k3s home-server setup used across this curriculum.</em></p>
+
+<nav>
+  <strong>Sections:</strong>
+  <a href="#why">1. Why Kubernetes</a>
+  <a href="#cluster">2. The cluster anatomy</a>
+  <a href="#pod">3. Pods — the atomic unit</a>
+  <a href="#workloads">4. Workload controllers</a>
+  <a href="#networking">5. Networking &amp; Services</a>
+  <a href="#config">6. Config &amp; Secrets</a>
+  <a href="#storage">7. Storage</a>
+  <a href="#kubectl">8. The kubectl model</a>
+  <a href="#commands">9. Commands cheatsheet</a>
+  <a href="#k3s">10. k3s &amp; flavors</a>
+  <a href="#interview">11. Interview answer</a>
+</nav>
+
+<!-- ============================================================== -->
+<h2 id="why">1. Why Kubernetes</h2>
+
+<p>Kubernetes (often abbreviated <code>k8s</code> — k + 8 letters + s) is a <strong>container orchestration platform</strong>. You hand it Docker containers and a desired-state spec ("run 3 copies of this, restart if any die, route traffic to them"); it makes that state real and keeps it real.</p>
+
+<h3>The problems it solves</h3>
+
+<ul>
+  <li><strong>Container scheduling.</strong> You have 50 machines and 200 containers. Where does each one run? Which machine has room? Kubernetes decides.</li>
+  <li><strong>Self-healing.</strong> A container crashes → restart it. A machine dies → reschedule its containers elsewhere. No human intervention.</li>
+  <li><strong>Rolling deployments.</strong> Replace v1 with v2 one container at a time, checking health between steps. Roll back automatically on failure.</li>
+  <li><strong>Service discovery + load balancing.</strong> "How do I reach the database?" → ask Kubernetes by name, traffic gets routed to a healthy container.</li>
+  <li><strong>Declarative config.</strong> You describe what you want in YAML; Kubernetes makes it happen. Same YAML produces same outcome every time, in any environment.</li>
+</ul>
+
+<h3>Why an AI Engineer cares</h3>
+
+<p>Production agentic AI systems land on Kubernetes for the same reasons every other distributed system does — but with an extra dimension: <strong>GPU scheduling.</strong> When you need to deploy an inference workload pinned to specific GPU nodes, route traffic to it, scale it up under load, and roll out a model upgrade without downtime, Kubernetes is the dominant answer.</p>
+
+<div class="summary">
+The cleanest one-liner: Kubernetes turns "I have 50 machines and 200 containers" into "I have a desired-state spec; the platform makes it real and keeps it real."
+</div>
+
+<!-- ============================================================== -->
+<h2 id="cluster">2. The cluster anatomy</h2>
+
+<p>A <strong>cluster</strong> is one or more machines coordinated as a single compute pool. Every Kubernetes cluster has two roles:</p>
+
+<table>
+  <thead><tr><th>Role</th><th>What it does</th><th>Typical count</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Control plane</strong> (formerly "master")</td><td>The brain. Receives your YAML, decides what runs where, monitors cluster state.</td><td>1 (dev) or 3+ (HA prod)</td></tr>
+    <tr><td><strong>Worker nodes</strong></td><td>Where your containers actually run.</td><td>1 to thousands</td></tr>
+  </tbody>
+</table>
+
+<h3>Control plane components</h3>
+
+<table>
+  <thead><tr><th>Component</th><th>Job</th></tr></thead>
+  <tbody>
+    <tr><td><code>kube-apiserver</code></td><td>The single entry point. Every <code>kubectl</code> command, every internal Kubernetes process, every cluster mutation flows through it. Stateless front door.</td></tr>
+    <tr><td><code>etcd</code></td><td>The cluster's database. Stores all state — what's running, what's desired, what's healthy. The only stateful component on the control plane.</td></tr>
+    <tr><td><code>kube-scheduler</code></td><td>"Pod X needs to run somewhere. Which node?" Considers resource requests, affinity, taints, etc.</td></tr>
+    <tr><td><code>kube-controller-manager</code></td><td>Runs reconciliation loops. "Desired: 3 replicas. Actual: 2. Spawn one more." Repeat forever for every controller (Deployment, ReplicaSet, Node, Service, etc.)</td></tr>
+    <tr><td><code>cloud-controller-manager</code></td><td>Interfaces with cloud APIs (AWS, GCP, Azure) for things like provisioning load balancers, volumes, or nodes.</td></tr>
+  </tbody>
+</table>
+
+<h3>Worker node components</h3>
+
+<table>
+  <thead><tr><th>Component</th><th>Job</th></tr></thead>
+  <tbody>
+    <tr><td><code>kubelet</code></td><td>The node's agent. Talks to apiserver, receives "run this pod" instructions, manages container lifecycle.</td></tr>
+    <tr><td><code>kube-proxy</code></td><td>Implements Service networking — routes traffic to pods, manages iptables/IPVS rules.</td></tr>
+    <tr><td>Container runtime</td><td>The actual container engine — <code>containerd</code> (modern default), or older <code>Docker</code>. Pulls images, starts/stops containers.</td></tr>
+  </tbody>
+</table>
+
+<h3>The mental model</h3>
+
+<pre><code>┌─────────────────────────── Control Plane ───────────────────────────┐
+│                                                                       │
+│   kubectl ──&gt; kube-apiserver  ──&gt; etcd (cluster state DB)            │
+│                     │                                                  │
+│                     ├──&gt; kube-scheduler   (assigns pods to nodes)    │
+│                     └──&gt; controller-manager (reconciles desired vs actual) │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+                              │
+            ┌─────────────────┼─────────────────┐
+            │                 │                 │
+       ┌────▼────┐       ┌────▼────┐       ┌────▼────┐
+       │ Node 1  │       │ Node 2  │       │ Node 3  │
+       │ kubelet │       │ kubelet │       │ kubelet │
+       │ kube-proxy│     │ kube-proxy│     │ kube-proxy│
+       │ containerd│     │ containerd│     │ containerd│
+       │  [pod][pod]│    │  [pod]   │     │  [pod][pod]│
+       └─────────┘       └─────────┘       └─────────┘
+</code></pre>
+
+<!-- ============================================================== -->
+<h2 id="pod">3. Pods — the atomic unit</h2>
+
+<p>A <strong>Pod</strong> is the smallest deployable unit in Kubernetes. <strong>Not a container — a wrapper around one or more containers</strong> that share network namespace, storage volumes, and lifecycle.</p>
+
+<h3>Important properties</h3>
+
+<ul>
+  <li><strong>One IP per pod.</strong> All containers in a pod share the same IP and port space. They can talk to each other on <code>localhost</code>.</li>
+  <li><strong>Shared volumes.</strong> Containers in a pod can share filesystem space via mounted volumes.</li>
+  <li><strong>Co-scheduled, co-located.</strong> A pod's containers always run on the same node.</li>
+  <li><strong>Ephemeral.</strong> Pods come and go. Treat them as cattle, not pets. Don't store state in a pod's local filesystem.</li>
+  <li><strong>You rarely create pods directly.</strong> You create a higher-level controller (Deployment, StatefulSet, etc.) that creates pods for you.</li>
+</ul>
+
+<h3>Minimal pod YAML</h3>
+
+<pre><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: matchscout-api
+  labels:
+    app: matchscout
+spec:
+  containers:
+  - name: api
+    image: myregistry/matchscout:v1.2.3
+    ports:
+    - containerPort: 8000
+    env:
+    - name: ANTHROPIC_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: api-keys
+          key: anthropic
+</code></pre>
+
+<h3>Why pods exist instead of just containers</h3>
+
+<p>The pod abstraction lets you group <strong>tightly-coupled containers that must share a network</strong>. The canonical example is the <strong>sidecar pattern</strong> — your app container plus a logging-shipper container that tails a shared volume. Both must be on the same machine; both must die together; both must talk on localhost. The pod expresses that.</p>
+
+<!-- ============================================================== -->
+<h2 id="workloads">4. Workload controllers</h2>
+
+<p>You almost never create Pods directly. You create higher-level controllers that own pods and reconcile them. Six common ones:</p>
+
+<h3>4.1 Deployment</h3>
+
+<p><strong>What it is:</strong> Stateless web apps, APIs, agents. The default choice for almost everything.</p>
+
+<p><strong>What it manages:</strong> A ReplicaSet, which manages Pods. You set <code>replicas: 3</code> and Deployment ensures 3 healthy pods exist.</p>
+
+<p><strong>What it does well:</strong> Rolling updates, rollbacks, scaling.</p>
+
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matchscout-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: matchscout
+  template:
+    metadata:
+      labels:
+        app: matchscout
+    spec:
+      containers:
+      - name: api
+        image: myregistry/matchscout:v1.2.3
+        ports:
+        - containerPort: 8000
+</code></pre>
+
+<h3>4.2 ReplicaSet</h3>
+
+<p>Maintains a stable set of replica Pods. <strong>You never create ReplicaSets directly</strong> — Deployments create them for you. Worth knowing about because rolling updates work by creating a new ReplicaSet and gradually shifting pods from old to new.</p>
+
+<h3>4.3 StatefulSet</h3>
+
+<p><strong>What it is:</strong> For workloads where pod identity matters — databases, Kafka brokers, Elasticsearch nodes.</p>
+
+<p><strong>What's different from Deployment:</strong> Each pod gets a stable name (<code>db-0</code>, <code>db-1</code>, <code>db-2</code>) and stable storage. Pods come back as the same identity after restart. They start in order (0, then 1, then 2) and stop in reverse.</p>
+
+<h3>4.4 DaemonSet</h3>
+
+<p><strong>What it is:</strong> Runs exactly one pod on every node. Used for node-level agents — log shippers, metrics agents, network plugins.</p>
+
+<h3>4.5 Job</h3>
+
+<p><strong>What it is:</strong> Runs a pod to completion. Used for batch work — database migrations, one-shot model evaluations, ingest runs.</p>
+
+<h3>4.6 CronJob</h3>
+
+<p><strong>What it is:</strong> A Job that runs on a schedule (cron syntax). Used for scheduled tasks — nightly report generation, recurring data ingest, periodic model retraining.</p>
+
+<!-- ============================================================== -->
+<h2 id="networking">5. Networking &amp; Services</h2>
+
+<p>Pods come and go; their IPs change. You can't hardcode "talk to pod 10.244.3.17" — that pod could die in 30 seconds. The solution: <strong>Service</strong>.</p>
+
+<h3>What a Service is</h3>
+
+<p>A Service is a <strong>stable network endpoint</strong> in front of a set of pods, selected by labels. Service has a long-lived IP and DNS name; pods behind it can come and go.</p>
+
+<pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: matchscout-svc
+spec:
+  selector:
+    app: matchscout              # any pod with this label is behind the Service
+  ports:
+  - port: 80                      # Service port
+    targetPort: 8000              # Pod port
+  type: ClusterIP                 # ← type matters; see below
+</code></pre>
+
+<h3>Service types</h3>
+
+<table>
+  <thead><tr><th>Type</th><th>Reachable from</th><th>When to use</th></tr></thead>
+  <tbody>
+    <tr><td><code>ClusterIP</code> (default)</td><td>Inside cluster only</td><td>Internal app-to-app traffic — most common</td></tr>
+    <tr><td><code>NodePort</code></td><td>Outside cluster via <code>&lt;node-ip&gt;:&lt;port&gt;</code> where port is in 30000–32767</td><td>Quick external exposure for dev/k3s setups</td></tr>
+    <tr><td><code>LoadBalancer</code></td><td>Outside cluster via a cloud load balancer</td><td>Production cloud (AWS/GCP/Azure) — provisions an ELB / GLB automatically</td></tr>
+    <tr><td><code>ExternalName</code></td><td>DNS alias to an external service</td><td>Pointing inside-cluster names at outside-cluster databases</td></tr>
+  </tbody>
+</table>
+
+<h3>NodePort — the home-server pattern</h3>
+
+<p>Used heavily in this curriculum's k3s setup (192.168.1.156). Kubernetes opens a port (e.g. 30002) on EVERY node in the cluster; traffic to <code>&lt;any-node-ip&gt;:30002</code> gets routed to a healthy pod behind the Service. The Kanban server, Kafka broker, and MongoDB are all exposed this way:</p>
+
+<pre><code>type: NodePort
+ports:
+- port: 80
+  targetPort: 8000
+  nodePort: 30002              # the port on the node's external IP
+</code></pre>
+
+<p>This is "good enough" for home labs and dev clusters. Production cloud deployments use <code>LoadBalancer</code> or <code>Ingress</code> instead.</p>
+
+<h3>Ingress — the proper external entry point</h3>
+
+<p>An Ingress is a layer-7 (HTTP/HTTPS) router that sits in front of Services. One Ingress controller, one cloud LB, many Services routed by path or hostname:</p>
+
+<pre><code>spec:
+  rules:
+  - host: api.matchscout.com
+    http:
+      paths:
+      - path: /v1/recommend
+        backend:
+          service:
+            name: matchscout-svc
+            port: { number: 80 }
+      - path: /v1/health
+        backend:
+          service:
+            name: healthcheck-svc
+            port: { number: 80 }
+</code></pre>
+
+<p>Ingress controllers (NGINX, Traefik, AWS ALB Ingress Controller) implement the actual routing. <strong>k3s ships with Traefik out of the box.</strong></p>
+
+<!-- ============================================================== -->
+<h2 id="config">6. Config &amp; Secrets</h2>
+
+<p>Hardcoding configuration into container images is an anti-pattern. Kubernetes provides two primitives:</p>
+
+<h3>ConfigMap — non-secret config</h3>
+
+<pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matchscout-config
+data:
+  PROMPT_VERSION: "arm2_v3"
+  CONTROL_FRACTION: "0.5"
+  LANGSMITH_PROJECT: "matchscout-prod"
+</code></pre>
+
+<p>Mount as env vars or files into the pod.</p>
+
+<h3>Secret — sensitive config</h3>
+
+<p>Same shape as ConfigMap but base64-encoded and meant for credentials. RBAC-protected, encrypted at rest in etcd.</p>
+
+<pre><code>apiVersion: v1
+kind: Secret
+metadata:
+  name: api-keys
+type: Opaque
+data:
+  anthropic: c2stYW50LXh4eHh4...        # base64-encoded
+  openai: c2stcHJvai14eHh4eHh...
+</code></pre>
+
+<p>In production: use external secret managers (AWS Secrets Manager, HashiCorp Vault) with the External Secrets Operator. Kubernetes Secrets are not actually encrypted unless you configure encryption-at-rest for etcd.</p>
+
+<!-- ============================================================== -->
+<h2 id="storage">7. Storage</h2>
+
+<p>Pods are ephemeral; their local disk dies with them. Persistent state needs Volumes.</p>
+
+<table>
+  <thead><tr><th>Object</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Volume</strong></td><td>Storage attached to a Pod's lifecycle. Survives container restarts but not pod deletion (for most volume types).</td></tr>
+    <tr><td><strong>PersistentVolume (PV)</strong></td><td>Cluster-level storage resource. Provisioned by admin or dynamically by a StorageClass.</td></tr>
+    <tr><td><strong>PersistentVolumeClaim (PVC)</strong></td><td>A pod's request for storage. "I need 10 GB, fast SSD." Kubernetes matches PVCs to PVs.</td></tr>
+    <tr><td><strong>StorageClass</strong></td><td>Recipe for dynamic provisioning. "When someone asks for storage, create an EBS volume of this type." Cloud-specific.</td></tr>
+  </tbody>
+</table>
+
+<p>For stateful workloads (databases on StatefulSet), each pod gets its own PVC, dynamically provisioned by the StorageClass. The pod can die and respawn elsewhere; the data follows it.</p>
+
+<!-- ============================================================== -->
+<h2 id="kubectl">8. The kubectl model</h2>
+
+<p><code>kubectl</code> is the CLI. <strong>It talks only to the apiserver.</strong> Everything you do is a structured API call.</p>
+
+<h3>Two interaction styles</h3>
+
+<h4>Imperative — quick, ad-hoc</h4>
+
+<pre><code>kubectl run mybox --image=busybox -- sleep 3600
+kubectl scale deployment matchscout-api --replicas=5
+kubectl delete pod matchscout-api-7b8d9-x4q2v
+</code></pre>
+
+<h4>Declarative — production discipline</h4>
+
+<pre><code># Write YAML, version it in git
+kubectl apply -f deployment.yaml
+
+# Update YAML, re-apply — Kubernetes reconciles the difference
+kubectl apply -f deployment.yaml
+
+# Delete by reference to the same YAML
+kubectl delete -f deployment.yaml
+</code></pre>
+
+<p><strong>Production always uses declarative.</strong> The YAML in git is the single source of truth; the cluster state is reconciled toward it. This is the foundation of GitOps (ArgoCD, Flux).</p>
+
+<h3>Context &amp; namespace — what most newcomers miss</h3>
+
+<p><strong>Context</strong> = "which cluster am I pointing at?" You can have many in <code>~/.kube/config</code> (home k3s, AWS EKS prod, GCP GKE dev).</p>
+
+<p><strong>Namespace</strong> = "which logical partition inside that cluster?" Namespaces isolate workloads — <code>matchscout-prod</code>, <code>matchscout-staging</code>, <code>shared-monitoring</code>.</p>
+
+<pre><code>kubectl config get-contexts                  # list configured clusters
+kubectl config use-context prod              # switch to prod cluster
+kubectl get pods -n matchscout-prod          # list pods in a namespace
+kubectl config set-context --current --namespace=matchscout-prod   # default to that namespace
+</code></pre>
+
+<!-- ============================================================== -->
+<h2 id="commands">9. kubectl commands cheatsheet</h2>
+
+<h3>Inspect</h3>
+
+<pre><code>kubectl get pods                                       # list pods (current namespace)
+kubectl get pods -A                                    # all namespaces
+kubectl get pods -o wide                               # include node and IP
+kubectl get all                                        # everything in current namespace
+kubectl get nodes                                      # cluster nodes
+kubectl get deployments                                # deployments
+kubectl get services                                   # services
+kubectl get pvc                                        # persistent volume claims
+
+kubectl describe pod matchscout-api-7b8d9-x4q2v        # detailed pod info, recent events
+kubectl describe node node1                            # detailed node info, resource usage
+</code></pre>
+
+<h3>Logs &amp; exec</h3>
+
+<pre><code>kubectl logs matchscout-api-7b8d9-x4q2v                # logs from pod
+kubectl logs -f matchscout-api-7b8d9-x4q2v             # follow (tail -f equivalent)
+kubectl logs matchscout-api-7b8d9-x4q2v --previous     # logs from the previous container restart
+kubectl logs -l app=matchscout                         # logs from all pods matching label
+
+kubectl exec -it matchscout-api-7b8d9-x4q2v -- bash    # shell into the pod
+kubectl exec matchscout-api-7b8d9-x4q2v -- ls /app     # run one command
+</code></pre>
+
+<h3>Modify</h3>
+
+<pre><code>kubectl apply -f deployment.yaml                       # create or update from YAML
+kubectl delete -f deployment.yaml                      # delete by YAML
+kubectl delete pod matchscout-api-7b8d9-x4q2v          # delete a pod (will be respawned if managed)
+
+kubectl scale deployment matchscout-api --replicas=5   # change replica count
+kubectl rollout status deployment matchscout-api       # watch a rolling update
+kubectl rollout undo deployment matchscout-api         # roll back to previous version
+kubectl rollout history deployment matchscout-api      # see deploy history
+
+kubectl edit deployment matchscout-api                 # open YAML in $EDITOR, save → apply
+</code></pre>
+
+<h3>Networking &amp; debugging</h3>
+
+<pre><code>kubectl port-forward svc/matchscout-svc 8080:80        # forward a service to localhost
+kubectl port-forward pod/matchscout-api-7b8d9 8000     # forward a pod port
+
+kubectl get events --sort-by='.lastTimestamp'          # cluster events, recent first
+kubectl top pods                                        # CPU/memory usage by pod
+kubectl top nodes                                       # CPU/memory usage by node
+</code></pre>
+
+<h3>Cleanup</h3>
+
+<pre><code>kubectl delete deployment matchscout-api               # delete a deployment (and its pods)
+kubectl delete namespace matchscout-staging            # nuke a whole namespace
+</code></pre>
+
+<!-- ============================================================== -->
+<h2 id="k3s">10. k3s &amp; flavors of Kubernetes</h2>
+
+<p>Several Kubernetes distributions exist for different use cases:</p>
+
+<table>
+  <thead><tr><th>Distribution</th><th>Use case</th></tr></thead>
+  <tbody>
+    <tr><td><strong>k3s</strong></td><td>Single binary, &lt;50 MB, ideal for edge, IoT, home labs, dev. Used in this curriculum's home server (192.168.1.156) for the Kanban app + Kafka broker + Mavic Drone MongoDB.</td></tr>
+    <tr><td><strong>minikube / kind</strong></td><td>Single-node local dev clusters on your laptop.</td></tr>
+    <tr><td><strong>kubeadm</strong></td><td>Bare-metal production with manual setup. The reference implementation.</td></tr>
+    <tr><td><strong>EKS</strong> (AWS)</td><td>Managed control plane, you own worker nodes. The enterprise standard on AWS.</td></tr>
+    <tr><td><strong>GKE</strong> (Google)</td><td>Managed K8s on GCP. Often considered the most polished managed offering.</td></tr>
+    <tr><td><strong>AKS</strong> (Azure)</td><td>Managed K8s on Azure.</td></tr>
+    <tr><td><strong>OpenShift</strong> (Red Hat)</td><td>Enterprise distribution with built-in CI/CD, RBAC, etc. Common in regulated industries.</td></tr>
+  </tbody>
+</table>
+
+<h3>k3s specifics (the home-lab pattern)</h3>
+
+<ul>
+  <li>Single binary install: <code>curl -sfL https://get.k3s.io | sh -</code></li>
+  <li>SQLite-backed by default (no etcd) — perfect for single-node use; switch to embedded etcd for HA</li>
+  <li>Traefik bundled as the default Ingress controller</li>
+  <li>ServiceLB bundled for LoadBalancer support without cloud APIs</li>
+  <li><code>kubectl</code> works the same as on any other cluster — copy <code>/etc/rancher/k3s/k3s.yaml</code> to your laptop's <code>~/.kube/config</code> and point at the server IP</li>
+</ul>
+
+<p>The trade-off: k3s is wonderful for learning, edge, IoT, and personal projects. For enterprise prod with compliance/audit/HA requirements, you typically reach for EKS/GKE/AKS or OpenShift.</p>
+
+<h3>How an AI Engineer typically uses Kubernetes</h3>
+
+<table>
+  <thead><tr><th>Workload</th><th>K8s primitive</th></tr></thead>
+  <tbody>
+    <tr><td>Always-on inference API (e.g. agent backend, RAG service)</td><td>Deployment + Service (ClusterIP) + Ingress, optionally with HorizontalPodAutoscaler</td></tr>
+    <tr><td>GPU-pinned inference worker</td><td>Deployment with <code>nodeSelector</code> targeting GPU nodes, resource limits requesting <code>nvidia.com/gpu: 1</code></td></tr>
+    <tr><td>Vector database (Qdrant, Weaviate)</td><td>StatefulSet + PVC for persistent storage</td></tr>
+    <tr><td>Kafka broker (event log)</td><td>StatefulSet (3 replicas for prod) + PVC</td></tr>
+    <tr><td>Nightly evaluation runs</td><td>CronJob</td></tr>
+    <tr><td>Per-request batch jobs (one-shot ingests)</td><td>Job</td></tr>
+    <tr><td>Logging/metrics agents (Fluent Bit, Prometheus node exporter)</td><td>DaemonSet</td></tr>
+    <tr><td>API keys, model credentials</td><td>Secret (or External Secrets Operator → AWS Secrets Manager)</td></tr>
+    <tr><td>Prompt versions, feature flags</td><td>ConfigMap</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================== -->
+<h2 id="interview">11. The 90-second interview answer</h2>
+
+<div class="summary">
+"Kubernetes is a declarative container orchestration platform. You hand it a YAML spec — 'run 3 copies of this image, expose port 8000, restart anything that dies' — and it makes that real and keeps it real through reconciliation loops. The cluster has two layers: a control plane (apiserver as the entry point, etcd as the state store, scheduler placing pods on nodes, controller-manager running the reconciliation loops) and worker nodes (kubelet talking to apiserver, kube-proxy implementing service networking, containerd running containers).
+<br><br>
+The atomic unit is the Pod — one or more containers sharing network namespace and storage, co-scheduled on the same node. You almost never create pods directly. You use higher-level controllers: Deployment for stateless apps with rolling updates, StatefulSet for databases where pod identity matters, DaemonSet for node-level agents, Job and CronJob for batch and scheduled work.
+<br><br>
+For networking, Services give you a stable IP and DNS name in front of an ever-changing set of pods, selected by labels. Four types: ClusterIP for internal traffic (default), NodePort for cheap external exposure on every node's IP, LoadBalancer that provisions a cloud LB in EKS/GKE/AKS, and ExternalName as a DNS alias. For HTTP/HTTPS routing, an Ingress controller sits in front of Services and routes by path or hostname.
+<br><br>
+Config and secrets are first-class objects: ConfigMaps for non-sensitive config, Secrets for credentials (in production, external secret managers feed into them). Persistent storage is PersistentVolumeClaim against StorageClass-provisioned PersistentVolumes — that's how StatefulSets keep state across pod restarts.
+<br><br>
+For AI workloads, the patterns are: Deployment for inference APIs (with HorizontalPodAutoscaler for traffic-based scaling), Deployment with <code>nvidia.com/gpu</code> resource requests for GPU pinning, StatefulSet for vector DBs and Kafka, CronJob for nightly evals, External Secrets Operator pointed at AWS Secrets Manager for credentials. For local dev and edge use I run k3s — single binary, SQLite-backed, Traefik bundled — and the same kubectl commands work against EKS or GKE for production."
+</div>
+
+</body>
+</html>
