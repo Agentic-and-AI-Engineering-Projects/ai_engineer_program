@@ -78,11 +78,13 @@ load_dotenv()
 # Bedrock configuration
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-# Plain region-pinned model ID — confirmed available in us-east-1.
-# For production, you'd typically swap to a cross-region inference profile
-# (e.g. "us.anthropic.claude-sonnet-4-6") for 2-3x higher rate limits at
-# no cost difference. The primer prints available profiles so you can swap.
-BEDROCK_MODEL_ID = "anthropic.claude-sonnet-4-6"
+# Cross-region inference profile — required for Claude Sonnet 4.6 on-demand.
+# The plain region-pinned ID `anthropic.claude-sonnet-4-6` will raise
+# `ValidationException: Invocation of model ID ... with on-demand throughput
+# isn't supported.` AWS requires newer Claude models to route through an
+# inference profile (us./eu./apac. prefix), which gives us 2-3x higher
+# rate limits transparently at no cost difference.
+BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 # Direct Anthropic API model name (same model, different access path)
 ANTHROPIC_MODEL_ID = "claude-sonnet-4-6"

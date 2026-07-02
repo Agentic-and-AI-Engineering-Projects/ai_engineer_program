@@ -48,6 +48,7 @@
   <a href="#setup">8. Setup checklist</a>
   <a href="#pricing">9. Pricing reality</a>
   <a href="#errors">10. Common errors</a>
+  <a href="#case-study">10.5. P2.5 real-run case study</a>
   <a href="#interview">11. Interview answer</a>
 </nav>
 
@@ -396,6 +397,45 @@ except ClientError as e:
     <tr><td><code>UnrecognizedClientException</code></td><td>Bad AWS credentials</td><td><code>aws sts get-caller-identity</code> to diagnose</td></tr>
   </tbody>
 </table>
+
+<!-- ============================================================== -->
+<h2 id="case-study">10.5. P2.5 primer real-run case study (2026-07-01)</h2>
+
+<p>Actual output from the P2.5 primer run, comparing Claude Sonnet 4.6 invocations via Bedrock (us-east-1) and direct Anthropic API for the same prompt (<em>"In exactly two sentences, explain what a vector database is."</em>). Captures the concrete numbers to replace the placeholder estimates elsewhere.</p>
+
+<table>
+  <thead><tr><th>Metric</th><th>Bedrock</th><th>Direct Anthropic API</th></tr></thead>
+  <tbody>
+    <tr><td>Model used</td><td>claude-sonnet-4-6 via <code>us.anthropic.claude-sonnet-4-6</code> cross-region profile</td><td>claude-sonnet-4-6</td></tr>
+    <tr><td>Input tokens</td><td>19</td><td>19 (identical tokenizer)</td></tr>
+    <tr><td>Output tokens</td><td>80</td><td>81 (± 1)</td></tr>
+    <tr><td>Latency (ms)</td><td><strong>12,203</strong></td><td>15,151</td></tr>
+    <tr><td>Cost (USD)</td><td>$0.001257</td><td>$0.001272</td></tr>
+    <tr><td>Stop reason</td><td><code>end_turn</code></td><td><code>end_turn</code></td></tr>
+  </tbody>
+</table>
+
+<p><strong>Key observations from the run:</strong></p>
+
+<ul>
+  <li><strong>Cost per-token is genuinely identical between paths</strong> — the tiny difference ($0.000015) is just because Direct Anthropic returned one extra output token. Confirms the "pricing parity" claim empirically.</li>
+  <li><strong>Bedrock was 20% FASTER than direct Anthropic on this run</strong> (12.2s vs 15.2s). This isn't universal — it's one sample and depends on network routing, cache state, and the direct-API endpoint's regional traffic. But it kills the assumption that direct-API is always faster. In practice, Bedrock latency is competitive because AWS runs the model on infrastructure close to your workload.</li>
+  <li><strong>Output text was nearly identical semantically</strong> — different phrasing (Bedrock: "specialized database system designed to store, manage, and index" vs. Direct: "specialized database designed to store, index, and query"), same technical content, same length within 1 token. Confirms both paths hit the same weights.</li>
+</ul>
+
+<h3>What the model discovery call revealed</h3>
+
+<p>The account's <code>list_foundation_models</code> + <code>list_inference_profiles</code> calls returned:</p>
+
+<ul>
+  <li><strong>17 foundation models</strong> visible (all Claude generations from 3 through Sonnet 5 and Opus 4.8)</li>
+  <li><strong>65+ cross-region inference profiles</strong> across Anthropic, Meta Llama, DeepSeek, Amazon Nova, Mistral, Stability, Writer, TwelveLabs, Cohere</li>
+  <li><strong>Two prefix flavors:</strong> <code>us.*</code> (routes across US regions only) and <code>global.*</code> (routes worldwide; newer, higher throughput ceiling)</li>
+</ul>
+
+<div class="good">
+<strong>The lesson worth carrying forward:</strong> Bedrock progressively deprecates on-demand invocation of plain region-pinned IDs for newer models. The first run of the primer with <code>anthropic.claude-sonnet-4-6</code> hit <code>ValidationException: Invocation of model ID ... with on-demand throughput isn't supported</code>. Fixing it was one string change: add the <code>us.</code> prefix. Default new code to cross-region profile IDs — same code path, higher rate limits, futureproof.
+</div>
 
 <!-- ============================================================== -->
 <h2 id="interview">11. The 90-second interview answer</h2>
