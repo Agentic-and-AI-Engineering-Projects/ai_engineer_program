@@ -218,15 +218,14 @@ Weekly plan tickets in Kanban track the week's goals.
 - [x] P1 ToolBot revision — COMPLETE (6 concepts)
 - [x] P2 DocTalk revision — COMPLETE (5 concepts)
 - [x] **P3 ResearchBot revision — COMPLETE 2026-06-25** (all 8 concepts; Concept 8 Kafka quiz 5/8 with gap-fills patched into Appendix J of master guide)
-- [ ] P4 StockSage revision — queued
-- [ ] P5 ReviewCrew revision — queued
+- [ ] **P5 ReviewCrew revision — IN PROGRESS** (kicked off 2026-07-01; consolidation of all 3 CrewAI orchestration modes into `p5_reviewcrew/` complete; awaiting Phase A on Concept 1)
 - [ ] P6 MCP++ revision — queued
 - [ ] P7 MatchScout revision — queued
 
-**Active queue order (re-locked 2026-06-26 — Bedrock primer slotted in):**
-1. P2 Pinecone variant (`p2_doctalk/doctalk_pinecone.py`) — IN FLIGHT, awaiting user run
-2. **P2.5 AWS Bedrock primer** (`p2_5_bedrock_primer/bedrock_primer.py`) — CREATED 2026-06-26, awaiting user AWS setup + run
-3. P5 ReviewCrew revision
+**Active queue order (re-locked 2026-06-26; P2 + P2.5 closed 2026-06-29 → 2026-07-01):**
+1. P2 Pinecone variant (`p2_doctalk/doctalk_pinecone.py`) — ✅ DONE (289 chunks, side-by-side vs Qdrant, real numbers in Appendix K §9.5)
+2. P2.5 AWS Bedrock primer (`p2_5_bedrock_primer/bedrock_primer.py`) — ✅ DONE 2026-07-01 (Bedrock 12.2s @ $0.00126 vs Direct Anthropic 15.2s @ $0.00127, real case study in Appendix L §10.5; cross-region model ID required for Claude Sonnet 4.6+)
+3. **P5 ReviewCrew revision — IN PROGRESS (started 2026-07-01)** — 5 concepts locked, `crew_hierarchical.py` added to consolidate all 3 modes side-by-side
 4. P6 MCP++ revision
 5. **P13 MatchScout V2 Agent SDK rebuild on Bedrock** (carries `advanced_patterns/03_reflexion/`; Bedrock-hosted Claude via boto3 + Agent SDK)
 6. Database Foundations + Phase-A quizzes (PostgreSQL + MongoDB)
